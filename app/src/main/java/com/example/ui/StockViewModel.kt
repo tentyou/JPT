@@ -10,6 +10,7 @@ import com.example.data.AppDatabase
 import com.example.data.Project
 import com.example.data.StockItem
 import com.example.data.StockRepository
+import com.example.onlinepull.RemoteUploadRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -21,6 +22,7 @@ import java.util.UUID
 class StockViewModel(application: Application) : AndroidViewModel(application) {
 
     private val context = application.applicationContext
+    private val remoteSyncDao by lazy { AppDatabase.getDatabase(context).remoteSyncDao() }
     val repository: StockRepository
 
     // Project & Stock lists
@@ -87,6 +89,7 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
                         processedCount = itemsWithPdf.size
                         for (item in itemsWithPdf) {
                             repository.generatePdfForItem(context, item)
+                            enqueueRemotePdf(item)
                         }
                     } catch (e: Exception) {
                         e.printStackTrace()
@@ -166,6 +169,7 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
                 val itemsWithPdf = allProjectItems.filter { it.pdfStatus == "已生成" }
                 for (item in itemsWithPdf) {
                     repository.generatePdfForItem(context, item)
+                    enqueueRemotePdf(item)
                 }
             }
         }
@@ -185,6 +189,7 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
                 val itemsWithPdf = allProjectItems.filter { it.pdfStatus == "已生成" }
                 for (item in itemsWithPdf) {
                     repository.generatePdfForItem(context, item)
+                    enqueueRemotePdf(item)
                 }
             }
         }
@@ -333,6 +338,7 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
                     val freshPdf = repository.generatePdfForItem(context, item)
                     if (freshPdf != null && freshPdf.exists()) {
                         repository.updatePhotoState(item.uid, currentPhotoCount, "已生成")
+                        enqueueRemotePdf(item)
                         _backgroundPdfMessage.value = "盘点单「${item.name}」拍照拼合 PDF 完成！照片拼合生成并自动进行高质无损压缩（体积通常缩减92%以上）。"
                     } else {
                         repository.updatePhotoState(item.uid, currentPhotoCount, "未生成")
@@ -403,6 +409,7 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
             val currentPhotoCount = repository.countPhotos(context, activeItem.uid)
             if (currentPhotoCount > 0) {
                 repository.generatePdfForItem(context, activeItem)
+                enqueueRemotePdf(activeItem)
             } else {
                 repository.updatePhotoState(activeItem.uid, 0, "未生成")
             }
@@ -422,6 +429,7 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
             val success = repository.cropImageFile(file, topPct, bottomPct, leftPct, rightPct)
             if (success) {
                 repository.generatePdfForItem(context, activeItem)
+                enqueueRemotePdf(activeItem)
                 withContext(Dispatchers.Main) {
                     refreshActiveSessionPhotos(activeItem.uid)
                     Toast.makeText(context, "纸张裁剪与图像校正切边在App中生效！", Toast.LENGTH_SHORT).show()
@@ -446,8 +454,10 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
      * Update individual items (for checking/unchecking isInventoried / shouldCheck value)
      */
     fun updateItem(item: StockItem) {
-        viewModelScope.launch {
-            repository.insertItem(item)
+        viewModelScope.launch(Dispatchers.IO) {
+            // A remote binding owns the shouldCheck flag; local UI cannot opt it out.
+            val isRemoteBound = remoteSyncDao.bindingsForProject(item.projectId).any { it.stockUid == item.uid }
+            repository.insertItem(if (isRemoteBound) item.copy(shouldCheck = true) else item)
         }
     }
 
@@ -698,6 +708,13 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Adds a generated PDF to the durable remote upload queue when the asset is remotely bound. */
+    fun enqueueRemotePdf(item: StockItem) {
+        viewModelScope.launch(Dispatchers.IO) {
+            RemoteUploadRepository(context).enqueuePdf(item.projectId, item.uid)
+        }
+    }
+
     /**
      * Simple manual build controller.
      */
@@ -706,6 +723,7 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
             val freshPdf = repository.generatePdfForItem(context, item)
             withContext(Dispatchers.Main) {
                 if (freshPdf != null && freshPdf.exists()) {
+                    enqueueRemotePdf(item)
                     Toast.makeText(context, "PDF 合并生成成功！", Toast.LENGTH_SHORT).show()
                 } else {
                     Toast.makeText(context, "生成 PDF 失败（请先拍照）", Toast.LENGTH_SHORT).show()

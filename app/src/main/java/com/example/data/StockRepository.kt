@@ -440,7 +440,7 @@ class StockRepository(
 
     /**
      * 线上拉取导入：将映射好的 StockItem 写入指定项目。
-     * replace=true 时先清空该项目旧清单及其照片/PDF 文件。
+     * replace=true 仅替换清单记录，不删除本地照片/PDF 文件。远端同步使用稳定键增量合并。
      * @return 实际写入的行数
      */
     suspend fun importOnlineItems(
@@ -450,11 +450,6 @@ class StockRepository(
         replace: Boolean
     ): Int = withContext(Dispatchers.IO) {
         if (replace) {
-            val oldItems = stockItemDao.getItemsByProjectSync(projectId)
-            for (item in oldItems) {
-                File(context.filesDir, "pdfs/${item.uid}").deleteRecursively()
-                File(context.filesDir, "photos/${item.uid}").deleteRecursively()
-            }
             stockItemDao.deleteItemsByProject(projectId)
         }
         if (items.isNotEmpty()) {

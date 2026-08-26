@@ -63,7 +63,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.example.data.StockItem
-import com.example.onlinepull.OnlinePullScreen
+import com.example.onlinepull.AutoOnlinePullScreen
 import com.example.ui.StockViewModel
 import com.example.ui.theme.MyApplicationTheme
 import androidx.compose.ui.input.pointer.pointerInput
@@ -102,7 +102,7 @@ fun MainAppContent(viewModel: StockViewModel) {
     var showOnlinePull by remember { mutableStateOf(false) }
 
     if (showOnlinePull) {
-        OnlinePullScreen(viewModel = viewModel, onClose = { showOnlinePull = false })
+        AutoOnlinePullScreen(stockViewModel = viewModel, onClose = { showOnlinePull = false })
         return
     }
 

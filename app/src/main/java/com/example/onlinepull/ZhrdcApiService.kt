@@ -108,6 +108,7 @@ class ZhrdcApiService {
 
     private fun buildRequest(path: String, method: String, body: String?): Request {
         val url = if (path.startsWith("http")) path else baseUrl + path
+        requireAllowedUrl(url)
         val builder = Request.Builder()
             .url(url)
             .header("x-request-key", UUID.randomUUID().toString())
@@ -122,18 +123,36 @@ class ZhrdcApiService {
         return builder.build()
     }
 
+    private fun clearCookies() {
+        try {
+            CookieManager.getInstance().removeAllCookies(null)
+            CookieManager.getInstance().flush()
+        } catch (_: Throwable) {
+        }
+    }
+
+    private fun requireAllowedUrl(url: String) {
+        val uri = android.net.Uri.parse(url)
+        require(uri.scheme == "https" && (uri.host == "zhrdc.net" || uri.host?.endsWith(".zhrdc.net") == true)) {
+            "拒绝访问非评估系统域名"
+        }
+    }
+
     /** 执行请求并解析为 JSONObject；网络/协议异常向上抛出 */
     private suspend fun execute(request: Request): JSONObject = withContext(Dispatchers.IO) {
-        log(">> ${request.method} ${request.url}")
+        log(">> " + request.method + " " + request.url.encodedPath)
+        val startedAt = System.nanoTime()
         client.newCall(request).execute().use { resp ->
             val text = resp.body?.string() ?: ""
-            log("<< HTTP ${resp.code} len=${text.length} body=${text.take(800)}")
+            log("<< HTTP " + resp.code + " ms=" + ((System.nanoTime() - startedAt) / 1_000_000L) + " len=" + text.length)
             val json = try {
                 if (text.isBlank()) JSONObject() else JSONObject(text)
             } catch (e: Exception) {
-                throw ZhrdcApiException("响应不是有效 JSON（HTTP ${resp.code}）：${text.take(200)}")
+                throw ZhrdcApiException("响应不是有效 JSON（HTTP " + resp.code + "）")
             }
             val code = json.optInt("code", 200)
+            if (resp.code == 401 || resp.code == 403 || code == 401 || code == 403) clearCookies()
+            if (code == 401 || code == 403) throw ZhrdcApiException("登录态失效，请重新登录")
             if (code != 200 && json.has("code")) {
                 throw ZhrdcApiException("业务错误 code=$code msg=${json.optString("msg", "")}")
             }
@@ -177,30 +196,12 @@ class ZhrdcApiService {
         }
     }
 
-    // ---------------------------------------------------------------- 项目列表探测
+    // ---------------------------------------------------------------- 项目列表
 
-    /**
-     * 探测并获取当前用户可访问的项目列表。
-     * 线上系统的项目列表接口未在前期抓包中确认，因此按候选路径依次尝试
-     * （GET/POST、多组分页参数），并递归防御式提取「项目ID + 项目名称」。
-     * 每个候选接口的响应都会记录到日志（Tag=ZhrdcApi）便于迭代。
-     */
+    /** 获取当前用户可访问的项目列表。接口路径固定，分页参数兼容后端版本差异。 */
     suspend fun discoverProjects(): List<ProjectInfo> = withContext(Dispatchers.IO) {
-        val attempts = listOf(
-            "GET" to "/ty/api/project/list",
-            "POST" to "/ty/api/project/list",
-            "GET" to "/ty/api/projects",
-            "POST" to "/ty/api/projects",
-            "GET" to "/ty/api/project/page",
-            "POST" to "/ty/api/project/page",
-            "GET" to "/ty/api/user/project/list",
-            "POST" to "/ty/api/user/project/list",
-            "GET" to "/ty/api/project/my/list",
-            "GET" to "/ty/api/home/project/list",
-            "POST" to "/ty/api/home/project/list",
-            "GET" to "/ty/api/project/listByUser",
-            "GET" to "/ty/api/page_data"
-        )
+        var lastError: Exception? = null
+        val attempts = listOf("POST" to "/ty/api/projects")
         for ((method, path) in attempts) {
             try {
                 val list = fetchProjectPages(method, path)
@@ -208,12 +209,13 @@ class ZhrdcApiService {
                     log("discoverProjects: HIT ${method} ${path} -> ${list.size} projects")
                     return@withContext list
                 }
-                log("discoverProjects: ${method} ${path} -> 0 projects")
+                lastError = ZhrdcApiException("项目接口返回空列表或缺少项目 ID/名称")
             } catch (e: Exception) {
-                log("discoverProjects: ${method} ${path} failed: ${e.message}")
+                lastError = e
+                log("discoverProjects request failed")
             }
         }
-        emptyList()
+        throw lastError ?: ZhrdcApiException("项目接口不可用")
     }
 
     /** 分页参数候选：依次尝试，取最先返回数据的组合并翻页 */
@@ -329,10 +331,10 @@ class ZhrdcApiService {
                 }
             }
             walk(j)
-            log("listCompanies($projectId) -> ${out.size} companies; ids=${out.joinToString(",") { it.id }}")
+            log("listCompanies -> ${out.size} companies")
             out
         } catch (e: Exception) {
-            log("listCompanies FAILED: ${e.message}")
+            log("listCompanies FAILED")
             throw e
         }
     }
@@ -415,12 +417,12 @@ class ZhrdcApiService {
 
             val filtered = parseList(filterEmpty = true)
             if (hasLeaf(filtered)) {
-                log("subjectTree($projectId, [$ids]) -> ${filtered.size} roots (filtered empty-data subjects)")
+                log("subjectTree -> ${filtered.size} roots (filtered empty-data subjects)")
                 filtered
             } else {
                 // 回退：dataAvailable 语义不明导致全空时，保留原始树
                 val fallback = parseList(filterEmpty = false)
-                log("subjectTree($projectId, [$ids]) -> ${fallback.size} roots (fallback, no filter)")
+                log("subjectTree -> ${fallback.size} roots (fallback, no filter)")
                 fallback
             }
         }
@@ -507,19 +509,21 @@ class ZhrdcApiService {
                         targetInfo = "机器设备 draft=$draftId flag=$flag name=$name showFlag=${o.optInt("showFlag", -1)}"
                     }
                 }
-                log("probeDrafts($cid): ${arr.length()} subjects; withData=[${withData.joinToString(", ")}]; $targetInfo")
+                log("probeDrafts: ${arr.length()} subjects; withDataCount=${withData.size}; target=${targetInfo.isNotBlank()}")
                 // 验证：对第一个有数据的科目，用现有参数试拉明细
                 if (firstCode != null) {
                     try {
                         val page = draftData(projectId, firstCode, listOf(cid), 1, 1, 5000)
-                        log("probeDrafts($cid): verify $firstCode -> ${page.total} rows")
+                        log("probeDrafts: verified ${page.total} rows")
                     } catch (e: Exception) {
-                        log("probeDrafts($cid): verify $firstCode failed: ${e.message}")
+                        log("probeDrafts: verify failed")
                     }
                 }
             } catch (e: Exception) {
-                log("probeAssignmentDrafts($cid) failed: ${e.message}")
+                log("probeDrafts failed")
             }
         }
     }
+    /** Read-only JSON endpoint for attachment metadata. */
+    suspend fun rawGet(path: String): JSONObject = execute(buildRequest(path, "GET", null))
 }

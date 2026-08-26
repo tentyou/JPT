@@ -1,0 +1,459 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 6,
+    "identityHash": "3be4699d2d0bc351e1a26b4b44544bea",
+    "entities": [
+      {
+        "tableName": "stock_items",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`uid` TEXT NOT NULL, `name` TEXT NOT NULL, `category` TEXT NOT NULL, `location` TEXT NOT NULL, `originalCode` TEXT NOT NULL, `photoCount` INTEGER NOT NULL, `pdfStatus` TEXT NOT NULL, `projectId` TEXT NOT NULL, `shouldCheck` INTEGER NOT NULL, `originalRowJson` TEXT NOT NULL, `rowOrder` INTEGER NOT NULL, PRIMARY KEY(`uid`))",
+        "fields": [
+          {
+            "fieldPath": "uid",
+            "columnName": "uid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "category",
+            "columnName": "category",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "location",
+            "columnName": "location",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "originalCode",
+            "columnName": "originalCode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "photoCount",
+            "columnName": "photoCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pdfStatus",
+            "columnName": "pdfStatus",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "projectId",
+            "columnName": "projectId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shouldCheck",
+            "columnName": "shouldCheck",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "originalRowJson",
+            "columnName": "originalRowJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rowOrder",
+            "columnName": "rowOrder",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "uid"
+          ]
+        }
+      },
+      {
+        "tableName": "projects",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `baseDate` TEXT NOT NULL, `companyName` TEXT NOT NULL, `reportType` TEXT NOT NULL, `columnHeadersJson` TEXT NOT NULL, `watermarkEnabled` INTEGER NOT NULL, `watermarkBlEnabled` INTEGER NOT NULL, `watermarkBlShowDate` INTEGER NOT NULL, `watermarkBlShowTime` INTEGER NOT NULL, `watermarkBlShowGps` INTEGER NOT NULL, `watermarkBlShowAddress` INTEGER NOT NULL, `watermarkTrEnabled` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "baseDate",
+            "columnName": "baseDate",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "companyName",
+            "columnName": "companyName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reportType",
+            "columnName": "reportType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "columnHeadersJson",
+            "columnName": "columnHeadersJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "watermarkEnabled",
+            "columnName": "watermarkEnabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "watermarkBlEnabled",
+            "columnName": "watermarkBlEnabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "watermarkBlShowDate",
+            "columnName": "watermarkBlShowDate",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "watermarkBlShowTime",
+            "columnName": "watermarkBlShowTime",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "watermarkBlShowGps",
+            "columnName": "watermarkBlShowGps",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "watermarkBlShowAddress",
+            "columnName": "watermarkBlShowAddress",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "watermarkTrEnabled",
+            "columnName": "watermarkTrEnabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "remote_project_links",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`localProjectId` TEXT NOT NULL, `remoteProjectId` TEXT NOT NULL, `remoteProjectCode` TEXT NOT NULL, `remoteProjectName` TEXT NOT NULL, `lastSyncAt` INTEGER, `syncState` TEXT NOT NULL, `lastSyncError` TEXT, PRIMARY KEY(`localProjectId`))",
+        "fields": [
+          {
+            "fieldPath": "localProjectId",
+            "columnName": "localProjectId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "remoteProjectId",
+            "columnName": "remoteProjectId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "remoteProjectCode",
+            "columnName": "remoteProjectCode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "remoteProjectName",
+            "columnName": "remoteProjectName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastSyncAt",
+            "columnName": "lastSyncAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "syncState",
+            "columnName": "syncState",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastSyncError",
+            "columnName": "lastSyncError",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "localProjectId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_remote_project_links_remoteProjectId",
+            "unique": true,
+            "columnNames": [
+              "remoteProjectId"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_remote_project_links_remoteProjectId` ON `${TABLE_NAME}` (`remoteProjectId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "remote_asset_bindings",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`stableKey` TEXT NOT NULL, `localProjectId` TEXT NOT NULL, `stockUid` TEXT NOT NULL, `remoteRowId` TEXT, `companyId` TEXT NOT NULL, `companyName` TEXT NOT NULL, `subjectCode` TEXT NOT NULL, `subjectName` TEXT NOT NULL, `worksheetKey` TEXT NOT NULL, `inventoryIndexId` TEXT, `remoteSnapshotJson` TEXT NOT NULL, `active` INTEGER NOT NULL, `syncState` TEXT NOT NULL, `lastSyncedAt` INTEGER, `conflictReason` TEXT, PRIMARY KEY(`stableKey`))",
+        "fields": [
+          {
+            "fieldPath": "stableKey",
+            "columnName": "stableKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localProjectId",
+            "columnName": "localProjectId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "stockUid",
+            "columnName": "stockUid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "remoteRowId",
+            "columnName": "remoteRowId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "companyId",
+            "columnName": "companyId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "companyName",
+            "columnName": "companyName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "subjectCode",
+            "columnName": "subjectCode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "subjectName",
+            "columnName": "subjectName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "worksheetKey",
+            "columnName": "worksheetKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "inventoryIndexId",
+            "columnName": "inventoryIndexId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "remoteSnapshotJson",
+            "columnName": "remoteSnapshotJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "active",
+            "columnName": "active",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "syncState",
+            "columnName": "syncState",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastSyncedAt",
+            "columnName": "lastSyncedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "conflictReason",
+            "columnName": "conflictReason",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "stableKey"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_remote_asset_bindings_stockUid",
+            "unique": true,
+            "columnNames": [
+              "stockUid"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_remote_asset_bindings_stockUid` ON `${TABLE_NAME}` (`stockUid`)"
+          },
+          {
+            "name": "index_remote_asset_bindings_localProjectId_active",
+            "unique": false,
+            "columnNames": [
+              "localProjectId",
+              "active"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_remote_asset_bindings_localProjectId_active` ON `${TABLE_NAME}` (`localProjectId`, `active`)"
+          }
+        ]
+      },
+      {
+        "tableName": "upload_tasks",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`stableKey` TEXT NOT NULL, `localProjectId` TEXT NOT NULL, `stockUid` TEXT NOT NULL, `filePath` TEXT NOT NULL, `fileName` TEXT NOT NULL, `sha256` TEXT, `remoteFileId` TEXT, `status` TEXT NOT NULL, `attempts` INTEGER NOT NULL, `lastError` TEXT, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`stableKey`))",
+        "fields": [
+          {
+            "fieldPath": "stableKey",
+            "columnName": "stableKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localProjectId",
+            "columnName": "localProjectId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "stockUid",
+            "columnName": "stockUid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "filePath",
+            "columnName": "filePath",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fileName",
+            "columnName": "fileName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sha256",
+            "columnName": "sha256",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "remoteFileId",
+            "columnName": "remoteFileId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "attempts",
+            "columnName": "attempts",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastError",
+            "columnName": "lastError",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "stableKey"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_upload_tasks_status",
+            "unique": false,
+            "columnNames": [
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_upload_tasks_status` ON `${TABLE_NAME}` (`status`)"
+          },
+          {
+            "name": "index_upload_tasks_localProjectId_status",
+            "unique": false,
+            "columnNames": [
+              "localProjectId",
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_upload_tasks_localProjectId_status` ON `${TABLE_NAME}` (`localProjectId`, `status`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '3be4699d2d0bc351e1a26b4b44544bea')"
+    ]
+  }
+}

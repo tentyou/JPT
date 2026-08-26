@@ -1,22 +1,17 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# 点检盘点助手
 
-# Run and deploy your AI Studio app
+Android 盘点工具，支持本地台账导入、连续拍照、照片水印、单资产 PDF 和 ZIP 导出。
 
-This contains everything you need to run your app locally.
+## 线上评估系统同步
 
-View your app in AI Studio: https://ai.studio/apps/e6cff617-5ae0-46b2-b1e4-2de28f30a8db
+“线上同步”会打开 `ty.zhrdc.net` 登录页。登录后选择评估项目，App 自动扫描项目下全部公司和资产基础法科目，仅将远端“是否盘点=是”的条目同步到对应本地项目。同步采用远端项目 ID 和稳定行键增量合并，不会因重复同步删除已有照片或 PDF。
 
-## Run Locally
+PDF 生成后进入持久化上传队列。上传前会显示项目、公司、科目和资产信息；缺少盘点索引、行键冲突或会话失效的任务会被阻止或保留待重试，不修改评估系统底稿字段。
 
-**Prerequisites:**  [Android Studio](https://developer.android.com/studio)
+## 本地构建
 
+1. 使用 Android Studio 或 JDK 17+ 打开项目。
+2. 确认 `local.properties` 指向 Android SDK。
+3. 运行 `gradlew.bat assembleDebug` 或 `gradlew.bat testDebugUnitTest`。
 
-1. Open Android Studio
-2. Select **Open** and choose the directory containing this project
-3. Allow Android Studio to fix any incompatibilities as it imports the project.
-4. Create a file named `.env` in the project directory and set `GEMINI_API_KEY` in that file to your Gemini API key (see `.env.example` for an example)
-5. Remove this line from the app's `build.gradle.kts` file: `signingConfig = signingConfigs.getByName("debugConfig")`
-6. Run the app on an emulator or physical device
-7. If you have already published your app in AI Studio, please [request upload key reset](https://support.google.com/googleplay/android-developer/answer/9842756#zippy=%2Crequest-an-upload-key-reset) in Google Play Console.
+`.env`、签名文件、Cookie/Token、照片/PDF 和构建缓存不应提交到 Git。
