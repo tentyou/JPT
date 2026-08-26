@@ -216,7 +216,12 @@ private fun loginWebView(context: Context): WebView = WebView(context).apply {
         override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
             val uri = request?.url ?: return false
             val host = uri.host.orEmpty()
-            if (uri.scheme == "https" && (host == "zhrdc.net" || host.endsWith(".zhrdc.net"))) return false
+            if (host == "zhrdc.net" || host.endsWith(".zhrdc.net")) {
+                if (uri.scheme == "https") return false
+                if (uri.scheme == "http") {
+                    view?.loadUrl(uri.buildUpon().scheme("https").build().toString())
+                }
+            }
             return true
         }
     }
