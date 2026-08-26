@@ -1,7 +1,6 @@
 package com.example.onlinepull
 
 import android.content.Context
-import android.content.Intent
 import android.net.Uri
 import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
@@ -208,6 +207,8 @@ private fun loginWebView(context: Context): WebView = WebView(context).apply {
     layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
     settings.javaScriptEnabled = true
     settings.domStorageEnabled = true
+    settings.setSupportMultipleWindows(false)
+    settings.javaScriptCanOpenWindowsAutomatically = false
     settings.cacheMode = WebSettings.LOAD_DEFAULT
     settings.userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151.0 Safari/537.36"
     CookieManager.getInstance().setAcceptCookie(true)
@@ -216,8 +217,7 @@ private fun loginWebView(context: Context): WebView = WebView(context).apply {
             val uri = request?.url ?: return false
             val host = uri.host.orEmpty()
             if (uri.scheme == "https" && (host == "zhrdc.net" || host.endsWith(".zhrdc.net"))) return false
-            if (uri.scheme != "http" && uri.scheme != "https") return true
-            return try { context.startActivity(Intent(Intent.ACTION_VIEW, uri)); true } catch (_: Exception) { true }
+            return true
         }
     }
 }
