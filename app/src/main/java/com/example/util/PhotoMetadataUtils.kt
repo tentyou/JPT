@@ -4,7 +4,7 @@ import android.content.Context
 import android.location.Geocoder
 import android.location.Location
 import android.location.LocationManager
-import android.media.ExifInterface
+import androidx.exifinterface.media.ExifInterface
 import com.example.data.StockItem
 import java.io.File
 import java.text.SimpleDateFormat
@@ -15,7 +15,8 @@ data class PhotoPhysicalMetadata(
     val timeStr: String,
     val latitude: Double,
     val longitude: Double,
-    val address: String
+    val address: String,
+    val hasLocation: Boolean = false
 )
 
 object PhotoMetadataUtils {
@@ -62,13 +63,13 @@ object PhotoMetadataUtils {
                 val addresses = geocoder.getFromLocation(latitude, longitude, 1)
                 if (!addresses.isNullOrEmpty()) {
                     val address = addresses[0]
-                    return address.getAddressLine(0) ?: address.locality ?: "城市现场勘勘测点"
+                    return address.getAddressLine(0) ?: address.locality ?: "地址解析失败"
                 }
             }
         } catch (e: Exception) {
             e.printStackTrace()
         }
-        return "上海市黄浦区人民大道1号"
+        return "地址解析失败"
     }
 
     private fun decToDms(coordinate: Double): String {
@@ -84,35 +85,29 @@ object PhotoMetadataUtils {
     fun writePhysicalMetadata(context: Context, file: File, item: StockItem?) {
         try {
             val location = getDeviceLocation(context)
-            val finalLat: Double
-            val finalLng: Double
-            var resolvedAddress: String
-
-            if (location != null) {
-                finalLat = location.latitude
-                finalLng = location.longitude
-                resolvedAddress = getAddressFromLocation(context, finalLat, finalLng)
+            val resolvedAddress = if (location != null) {
+                val address = getAddressFromLocation(context, location.latitude, location.longitude)
+                if (item != null && item.location.isNotBlank()) "$address（台账位置：${item.location}）" else address
             } else {
-                // Realistic mock/fallback coordinates in Shanghai
-                finalLat = 31.2304 + (Math.random() - 0.5) * 0.01
-                finalLng = 121.4737 + (Math.random() - 0.5) * 0.01
-                resolvedAddress = "上海市黄浦区人民大道100号"
-            }
-
-            if (item != null && item.location.isNotEmpty()) {
-                resolvedAddress = "$resolvedAddress (${item.location})"
+                if (item != null && item.location.isNotBlank()) "未获取定位（台账位置：${item.location}）" else "未获取定位"
             }
 
             val exifInterface = ExifInterface(file.absolutePath)
 
-            // 1. Write GPS Coords
-            val latDMS = decToDms(finalLat)
-            val lngDMS = decToDms(finalLng)
-
-            exifInterface.setAttribute(ExifInterface.TAG_GPS_LATITUDE, latDMS)
-            exifInterface.setAttribute(ExifInterface.TAG_GPS_LATITUDE_REF, if (finalLat >= 0) "N" else "S")
-            exifInterface.setAttribute(ExifInterface.TAG_GPS_LONGITUDE, lngDMS)
-            exifInterface.setAttribute(ExifInterface.TAG_GPS_LONGITUDE_REF, if (finalLng >= 0) "E" else "W")
+            // 1. Write GPS only when a real device location is available.
+            if (location != null) {
+                val latDMS = decToDms(location.latitude)
+                val lngDMS = decToDms(location.longitude)
+                exifInterface.setAttribute(ExifInterface.TAG_GPS_LATITUDE, latDMS)
+                exifInterface.setAttribute(ExifInterface.TAG_GPS_LATITUDE_REF, if (location.latitude >= 0) "N" else "S")
+                exifInterface.setAttribute(ExifInterface.TAG_GPS_LONGITUDE, lngDMS)
+                exifInterface.setAttribute(ExifInterface.TAG_GPS_LONGITUDE_REF, if (location.longitude >= 0) "E" else "W")
+            } else {
+                exifInterface.setAttribute(ExifInterface.TAG_GPS_LATITUDE, null)
+                exifInterface.setAttribute(ExifInterface.TAG_GPS_LATITUDE_REF, null)
+                exifInterface.setAttribute(ExifInterface.TAG_GPS_LONGITUDE, null)
+                exifInterface.setAttribute(ExifInterface.TAG_GPS_LONGITUDE_REF, null)
+            }
 
             // 2. Write DatetimeOriginal / Datetime
             val sdfExif = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.CHINA)
@@ -138,16 +133,18 @@ object PhotoMetadataUtils {
         val fileTime = Date(file.lastModified())
         var dateStr = sdfDate.format(fileTime)
         var timeStr = sdfTime.format(fileTime)
-        var latitude = 31.2304
-        var longitude = 121.4737
-        var address = "上海市黄浦区人民大道100号"
+        var latitude = 0.0
+        var longitude = 0.0
+        var hasLocation = false
+        var address = "未获取定位"
 
         try {
             val exifInterface = ExifInterface(file.absolutePath)
-            val latLong = FloatArray(2)
-            if (exifInterface.getLatLong(latLong)) {
-                latitude = latLong[0].toDouble()
-                longitude = latLong[1].toDouble()
+            val latLong = exifInterface.getLatLong()
+            if (latLong != null && latLong.size >= 2) {
+                latitude = latLong[0]
+                longitude = latLong[1]
+                hasLocation = true
             }
 
             // Read Address
@@ -202,7 +199,8 @@ object PhotoMetadataUtils {
             timeStr = timeStr,
             latitude = latitude,
             longitude = longitude,
-            address = address
+            address = address,
+            hasLocation = hasLocation
         )
     }
 }

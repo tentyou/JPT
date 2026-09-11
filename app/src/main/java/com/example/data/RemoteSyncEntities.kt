@@ -25,11 +25,13 @@ data class RemoteAssetBinding(
     val companyName: String,
     val subjectCode: String,
     val subjectName: String,
+    val assetCode: String = "",
+    val assetName: String = "",
     val worksheetKey: String = "",
     val inventoryIndexId: String? = null,
     val remoteSnapshotJson: String = "",
     val active: Boolean = true,
-    val syncState: String = "synced",
+    val syncState: String = SyncStatus.SYNCED.storageValue,
     val lastSyncedAt: Long? = null,
     val conflictReason: String? = null
 )
@@ -43,7 +45,7 @@ data class UploadTask(
     val fileName: String,
     val sha256: String? = null,
     val remoteFileId: String? = null,
-    val status: String = "waiting",
+    val status: String = UploadStatus.WAITING.storageValue,
     val attempts: Int = 0,
     val lastError: String? = null,
     val updatedAt: Long = System.currentTimeMillis()

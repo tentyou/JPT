@@ -8,6 +8,15 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface RemoteSyncDao {
+    @Query("SELECT * FROM remote_project_links")
+    suspend fun allProjectLinks(): List<RemoteProjectLink>
+
+    @Query("SELECT * FROM remote_project_links WHERE localProjectId = :localId LIMIT 1")
+    fun observeProjectLink(localId: String): Flow<RemoteProjectLink?>
+
+    @Query("SELECT * FROM remote_asset_bindings WHERE localProjectId = :projectId")
+    fun observeBindings(projectId: String): Flow<List<RemoteAssetBinding>>
+
     @Query("SELECT * FROM remote_project_links WHERE remoteProjectId = :remoteId LIMIT 1")
     suspend fun findProjectByRemoteId(remoteId: String): RemoteProjectLink?
 
@@ -35,9 +44,33 @@ interface RemoteSyncDao {
     @Query("SELECT * FROM upload_tasks WHERE stableKey = :stableKey LIMIT 1")
     suspend fun uploadTask(stableKey: String): UploadTask?
 
+    @Query("SELECT * FROM remote_asset_bindings WHERE stableKey = :stableKey LIMIT 1")
+    suspend fun binding(stableKey: String): RemoteAssetBinding?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertUploadTask(task: UploadTask)
 
     @Query("DELETE FROM upload_tasks WHERE stableKey = :stableKey")
     suspend fun deleteUploadTask(stableKey: String)
+
+    @Query("DELETE FROM remote_asset_bindings WHERE localProjectId = :projectId")
+    suspend fun deleteBindingsForProject(projectId: String)
+
+    @Query("DELETE FROM upload_tasks WHERE localProjectId = :projectId")
+    suspend fun deleteUploadTasksForProject(projectId: String)
+
+    @Query("DELETE FROM remote_project_links WHERE localProjectId = :projectId")
+    suspend fun deleteProjectLink(projectId: String)
+
+    @Query("DELETE FROM remote_asset_bindings")
+    suspend fun deleteAllBindings()
+
+    @Query("DELETE FROM upload_tasks")
+    suspend fun deleteAllUploadTasks()
+
+    @Query("DELETE FROM remote_project_links")
+    suspend fun deleteAllProjectLinks()
+
+    @Query("DELETE FROM upload_tasks WHERE stockUid = :stockUid")
+    suspend fun deleteUploadTaskForStockUid(stockUid: String)
 }

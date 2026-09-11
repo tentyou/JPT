@@ -12,6 +12,7 @@ import java.net.Socket
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.util.UUID
+import java.util.concurrent.Semaphore
 
 class WifiTransferServer(
     private val context: Context,
@@ -40,17 +41,32 @@ class WifiTransferServer(
     private var serverSocket: ServerSocket? = null
     private var isRunning = false
     private var serverThread: Thread? = null
+    private var pairingToken = UUID.randomUUID().toString().replace("-", "")
+    private val connectionSlots = Semaphore(4)
+    private val maxRequestBodyBytes = 20 * 1024 * 1024
+
+    fun getPairingToken(): String = pairingToken
 
     fun start(port: Int = 8080) {
         if (isRunning) return
+        pairingToken = UUID.randomUUID().toString().replace("-", "")
         isRunning = true
         serverThread = Thread {
             try {
                 serverSocket = ServerSocket(port)
                 while (isRunning) {
                     val socket = serverSocket?.accept() ?: break
+                    if (!connectionSlots.tryAcquire()) {
+                        socket.close()
+                        continue
+                    }
                     Thread {
-                        handleClient(socket)
+                        try {
+                            socket.soTimeout = 15000
+                            handleClient(socket)
+                        } finally {
+                            connectionSlots.release()
+                        }
                     }.start()
                 }
             } catch (e: Exception) {
@@ -84,6 +100,7 @@ class WifiTransferServer(
             var filename = "upload.csv"
             var queryProjectId = ""
             var queryMode = "append" // append or replace
+            var queryToken = ""
 
             val queryStart = pathWithQuery.indexOf("?")
             val path = if (queryStart != -1) {
@@ -97,6 +114,7 @@ class WifiTransferServer(
                             "filename" -> filename = value
                             "projectId", "queryProjectId" -> queryProjectId = value
                             "mode" -> queryMode = value
+                            "token" -> queryToken = value
                         }
                     }
                 }
@@ -107,15 +125,33 @@ class WifiTransferServer(
 
             // Read all headers to skip them
             var contentLength = 0
+            var contentLengthSeen = false
+            var malformedContentLength = false
+            var chunkedTransfer = false
             var rangeHeader: String? = null
+            var headerToken = ""
             var line: String? = readLineBytes(input)
             while (line != null && line.isNotEmpty()) {
                 val lowerLine = line.lowercase()
                 if (lowerLine.startsWith("content-length:")) {
                     val parts = line.split(":", limit = 2)
                     if (parts.size == 2) {
-                        contentLength = parts[1].trim().toIntOrNull() ?: 0
+                        val parsedLength = parts[1].trim().toLongOrNull()
+                        if (parsedLength == null || parsedLength < 0L || parsedLength > Int.MAX_VALUE) {
+                            malformedContentLength = true
+                        } else if (contentLengthSeen && contentLength != parsedLength.toInt()) {
+                            malformedContentLength = true
+                        } else {
+                            contentLength = parsedLength.toInt()
+                            contentLengthSeen = true
+                        }
+                    } else {
+                        malformedContentLength = true
                     }
+                } else if (lowerLine.startsWith("transfer-encoding:")) {
+                    chunkedTransfer = line.substringAfter(":", "").split(",").any { it.trim().equals("chunked", ignoreCase = true) }
+                } else if (lowerLine.startsWith("x-tenken-token:")) {
+                    headerToken = line.substringAfter(":", "").trim()
                 } else if (lowerLine.startsWith("range:")) {
                     val parts = line.split(":", limit = 2)
                     if (parts.size == 2) {
@@ -126,6 +162,33 @@ class WifiTransferServer(
             }
 
             val out = socket.getOutputStream()
+
+            if (headerToken != pairingToken && queryToken != pairingToken) {
+                val body = "需要配对令牌".toByteArray(Charsets.UTF_8)
+                val headers = "HTTP/1.1 401 Unauthorized\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: ${body.size}\r\nConnection: close\r\n\r\n"
+                out.write(headers.toByteArray(Charsets.UTF_8))
+                out.write(body)
+                out.flush()
+                return
+            }
+            if (malformedContentLength || chunkedTransfer) {
+                val message = if (chunkedTransfer) "不支持分块请求" else "Content-Length 无效"
+                val status = if (chunkedTransfer) "411 Length Required" else "400 Bad Request"
+                val body = message.toByteArray(Charsets.UTF_8)
+                val headers = "HTTP/1.1 $status\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: ${body.size}\r\nConnection: close\r\n\r\n"
+                out.write(headers.toByteArray(Charsets.UTF_8))
+                out.write(body)
+                out.flush()
+                return
+            }
+            if (contentLength < 0 || contentLength > maxRequestBodyBytes) {
+                val body = "请求体过大".toByteArray(Charsets.UTF_8)
+                val headers = "HTTP/1.1 413 Payload Too Large\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: ${body.size}\r\nConnection: close\r\n\r\n"
+                out.write(headers.toByteArray(Charsets.UTF_8))
+                out.write(body)
+                out.flush()
+                return
+            }
 
             if (method == "GET" && path == "/") {
                 // Send beautiful web portal Page with dynamic projects injected
@@ -210,6 +273,17 @@ class WifiTransferServer(
                 out.write(xlsxBytes)
                 out.flush()
             } else if (method == "POST" && path == "/upload" && contentLength > 0) {
+                val sanitizedFilename = filename.substringAfterLast('/').substringAfterLast('\\').take(120)
+                val extension = sanitizedFilename.substringAfterLast(".", "").lowercase()
+                if (extension != "csv" && extension != "xlsx") {
+                    val body = "仅支持 CSV 或 XLSX 文件".toByteArray(Charsets.UTF_8)
+                    val headers = "HTTP/1.1 415 Unsupported Media Type\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: ${body.size}\r\nConnection: close\r\n\r\n"
+                    out.write(headers.toByteArray(Charsets.UTF_8))
+                    out.write(body)
+                    out.flush()
+                    return
+                }
+                filename = sanitizedFilename
                 // Read binary body content of exact Content-Length
                 val bodyBos = ByteArrayOutputStream()
                 val buffer = ByteArray(4096)
@@ -221,8 +295,16 @@ class WifiTransferServer(
                     bodyBos.write(buffer, 0, read)
                     totalRead += read
                 }
+                if (totalRead != contentLength) {
+                    val body = "请求体读取不完整".toByteArray(Charsets.UTF_8)
+                    val headers = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: ${body.size}\r\nConnection: close\r\n\r\n"
+                    out.write(headers.toByteArray(Charsets.UTF_8))
+                    out.write(body)
+                    out.flush()
+                    return
+                }
                 val bodyBytes = bodyBos.toByteArray()
-                
+
                 val defaultProject = kotlinx.coroutines.runBlocking {
                     val list = repository.listProjectsSync()
                     if (list.isNotEmpty()) list[0].id else "default_project"
@@ -232,7 +314,7 @@ class WifiTransferServer(
 
                 // Save and import the records
                 val recordsCountBefore = getItemsCount(targetProjId)
-                val tempFile = java.io.File(context.cacheDir, "wifi_upload_${UUID.randomUUID()}.$filename")
+                val tempFile = java.io.File(context.cacheDir, "wifi_upload_" + UUID.randomUUID() + "." + filename)
                 tempFile.parentFile?.mkdirs()
                 tempFile.writeBytes(bodyBytes)
                 
@@ -581,7 +663,7 @@ class WifiTransferServer(
                         if (rangeStart == -1L) rangeStart = 0L
                         if (rangeEnd == -1L || rangeEnd >= fileLength) rangeEnd = fileLength - 1L
 
-                        if (rangeStart >= fileLength) {
+                        if (rangeStart >= fileLength || rangeEnd < rangeStart) {
                             val rHeaders = "HTTP/1.1 416 Range Not Satisfiable\r\n" +
                                     "Content-Range: bytes */$fileLength\r\n" +
                                     "Content-Length: 0\r\n" +
@@ -675,7 +757,7 @@ class WifiTransferServer(
             .replace("<", "&lt;")
             .replace(">", "&gt;")
             .replace("\"", "&quot;")
-            .replace("'", "&#27;")
+            .replace("'", "&#39;")
     }
 
     private fun decodeJsonString(s: String): String {
@@ -728,9 +810,9 @@ class WifiTransferServer(
         }
 
         val projectsListHtml = projects.joinToString("") {
-            val baseDateText = it.baseDate.ifEmpty { "未设定" }
-            val companyNameText = it.companyName.ifEmpty { "未设定" }
-            val reportTypeText = it.reportType.ifEmpty { "未设定" }
+            val baseDateText = escapeHtml(it.baseDate.ifEmpty { "未设定" })
+            val companyNameText = escapeHtml(it.companyName.ifEmpty { "未设定" })
+            val reportTypeText = escapeHtml(it.reportType.ifEmpty { "未设定" })
             "<div class='project-item' id='item_${it.id}' onclick=\"selectProject('${it.id}')\">" +
                 "<div class='proj-name'>${escapeHtml(it.name)}</div>" +
                 "<div class='proj-meta'>日期: $baseDateText | 单位: $companyNameText</div>" +
@@ -1188,10 +1270,19 @@ class WifiTransferServer(
               </div>
 
               <script>
-                let knownProjects = $knownProjectsJson;
+                                  const authToken = '$pairingToken';
+                                  function apiFetch(url, options) {
+                                    const opts = options || {};
+                                    opts.headers = Object.assign({}, opts.headers || {}, {'X-Tenken-Token': authToken});
+                                    return fetch(url, opts);
+                                  }
+                                  function withToken(url) {
+                                    return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(authToken);
+                                  }
+                                  let knownProjects = $knownProjectsJson;
 
                 function pollProjects() {
-                  fetch('/api/projects')
+                  apiFetch('/api/projects')
                     .then(r => r.json())
                     .then(data => {
                       if (Array.isArray(data)) {
@@ -1280,7 +1371,7 @@ class WifiTransferServer(
                   const dateDigits = baseDate.replace(/-/g, '');
                   const defaultProjName = company + "-" + dateDigits;
 
-                  fetch('/api/project/add', {
+                  apiFetch('/api/project/add', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -1310,7 +1401,7 @@ class WifiTransferServer(
                     return;
                   }
 
-                  fetch('/api/project/delete', {
+                  apiFetch('/api/project/delete', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: id })
@@ -1333,7 +1424,7 @@ class WifiTransferServer(
                   const sel = document.getElementById('projectSelect');
                   if (!sel || !sel.value) return;
                   
-                  fetch('/api/project?queryProjectId=' + encodeURIComponent(sel.value))
+                  apiFetch('/api/project?queryProjectId=' + encodeURIComponent(sel.value))
                     .then(r => r.json())
                     .then(data => {
                       if (data.id) {
@@ -1389,7 +1480,7 @@ class WifiTransferServer(
                   const dateDigits = baseDateVal.replace(/-/g, '');
                   const updatedName = companyName + "-" + dateDigits;
 
-                  fetch('/api/project/update', {
+                  apiFetch('/api/project/update', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -1439,14 +1530,14 @@ class WifiTransferServer(
                   status.style.display = 'block';
                   status.innerText = "正在生成 ZIP 压缩包，需要一些时间，请稍等...";
 
-                  fetch('/api/prepare-zip?projectId=' + encodeURIComponent(sel.value))
+                  apiFetch('/api/prepare-zip?projectId=' + encodeURIComponent(sel.value))
                     .then(r => r.json())
                     .then(data => {
                       if (data.success) {
                         status.className = 'status-box active status-success';
                         status.style.display = 'block';
                         status.innerHTML = "ZIP 压缩整包生成成功。(大小: " + (data.size / 1024 / 1024).toFixed(2) + " MB)<br>" +
-                                           "<a href='/download-zip?projectId=" + encodeURIComponent(sel.value) + "' style='display: inline-block; margin-top: 12px; background-color: #10b981; color: white; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: bold; border: 1px solid #059669; transition: background-color 0.2s;'>下载 ZIP 压缩包 (内含分类盘点表及点检报告)</a>";
+                                           "<a href='/download-zip?projectId=" + encodeURIComponent(sel.value) + "&token=" + encodeURIComponent(authToken) + "' style='display: inline-block; margin-top: 12px; background-color: #10b981; color: white; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: bold; border: 1px solid #059669; transition: background-color 0.2s;'>下载 ZIP 压缩包 (内含分类盘点表及点检报告)</a>";
                       } else {
                         status.className = 'status-box active status-error';
                         status.style.display = 'block';
@@ -1464,7 +1555,7 @@ class WifiTransferServer(
                   const sel = document.getElementById('projectSelect');
                   const link = document.getElementById('templateLink');
                   if(sel) {
-                    link.href = '/download-template?projectId=' + sel.value;
+                    link.href = withToken('/download-template?projectId=' + encodeURIComponent(sel.value));
                   }
                   loadProjectMeta();
                 }
@@ -1503,7 +1594,7 @@ class WifiTransferServer(
                   status.style.display = 'block';
                   status.innerText = "正在传输并解析 [" + file.name + "] 中，请稍候...";
 
-                  fetch('/upload?projectId=' + encodeURIComponent(sel.value) + '&mode=' + mode + '&filename=' + encodeURIComponent(file.name), {
+                  apiFetch('/upload?projectId=' + encodeURIComponent(sel.value) + '&mode=' + mode + '&filename=' + encodeURIComponent(file.name), {
                     method: 'POST',
                     body: file
                   })

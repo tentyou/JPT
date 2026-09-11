@@ -5,12 +5,14 @@ import android.content.Context
 import android.net.Uri
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
+import androidx.core.content.edit
+import androidx.core.graphics.createBitmap
 import androidx.lifecycle.viewModelScope
 import com.example.data.AppDatabase
 import com.example.data.Project
 import com.example.data.StockItem
 import com.example.data.StockRepository
-import com.example.onlinepull.RemoteUploadRepository
+import com.example.onlinepull.UploadWorkScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -19,9 +21,12 @@ import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class StockViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val context = application.applicationContext
+    // Resolve the application context on demand; do not retain an Activity context in the ViewModel.
+    private val context: Context
+        get() = getApplication<Application>().applicationContext
     private val remoteSyncDao by lazy { AppDatabase.getDatabase(context).remoteSyncDao() }
     val repository: StockRepository
 
@@ -33,6 +38,10 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
     val activeProjectId = _activeProjectId.asStateFlow()
 
     val stockItems: StateFlow<List<StockItem>>
+    val remoteProjectLink = activeProjectId.flatMapLatest { remoteSyncDao.observeProjectLink(it) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+    val remoteBindings = activeProjectId.flatMapLatest { remoteSyncDao.observeBindings(it) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _isImporting = MutableStateFlow(false)
     val isImporting = _isImporting.asStateFlow()
@@ -89,7 +98,6 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
                         processedCount = itemsWithPdf.size
                         for (item in itemsWithPdf) {
                             repository.generatePdfForItem(context, item)
-                            enqueueRemotePdf(item)
                         }
                     } catch (e: Exception) {
                         e.printStackTrace()
@@ -105,7 +113,7 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
 
     fun completeTutorial() {
         _showTutorial.value = false
-        prefs.edit().putBoolean("show_tutorial", false).apply()
+        prefs.edit { putBoolean("show_tutorial", false) }
     }
 
     private val _watermarkBlEnabled = MutableStateFlow(true)
@@ -123,13 +131,13 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
     private val _watermarkBlShowAddress = MutableStateFlow(true)
     val watermarkBlShowAddress = _watermarkBlShowAddress.asStateFlow()
 
-    private val _watermarkBlAddress = MutableStateFlow("上海市黄浦区人民大道100号")
+    private val _watermarkBlAddress = MutableStateFlow("未获取定位")
     val watermarkBlAddress = _watermarkBlAddress.asStateFlow()
 
-    private val _watermarkBlLat = MutableStateFlow("31.2304")
+    private val _watermarkBlLat = MutableStateFlow("")
     val watermarkBlLat = _watermarkBlLat.asStateFlow()
 
-    private val _watermarkBlLng = MutableStateFlow("121.4737")
+    private val _watermarkBlLng = MutableStateFlow("")
     val watermarkBlLng = _watermarkBlLng.asStateFlow()
 
     fun updateWatermarkBlSettings(
@@ -169,7 +177,6 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
                 val itemsWithPdf = allProjectItems.filter { it.pdfStatus == "已生成" }
                 for (item in itemsWithPdf) {
                     repository.generatePdfForItem(context, item)
-                    enqueueRemotePdf(item)
                 }
             }
         }
@@ -189,7 +196,6 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
                 val itemsWithPdf = allProjectItems.filter { it.pdfStatus == "已生成" }
                 for (item in itemsWithPdf) {
                     repository.generatePdfForItem(context, item)
-                    enqueueRemotePdf(item)
                 }
             }
         }
@@ -197,14 +203,14 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startTutorial() {
         _showTutorial.value = true
-        prefs.edit().putBoolean("show_tutorial", true).apply()
+        prefs.edit { putBoolean("show_tutorial", true) }
     }
 
     private var wifiServer: WifiTransferServer? = null
 
     init {
         val database = AppDatabase.getDatabase(context)
-        repository = StockRepository(database.stockItemDao(), database.projectDao())
+        repository = StockRepository(database.stockItemDao(), database.projectDao(), database.remoteSyncDao())
         
         allProjects = repository.allProjects.stateIn(
             scope = viewModelScope,
@@ -299,6 +305,7 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteProject(project: Project, onDeleted: () -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
+            UploadWorkScheduler.cancelRetry(context, project.id)
             repository.deleteProject(context, project)
             val remaining = repository.listProjectsSync()
             withContext(Dispatchers.Main) {
@@ -338,13 +345,14 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
                     val freshPdf = repository.generatePdfForItem(context, item)
                     if (freshPdf != null && freshPdf.exists()) {
                         repository.updatePhotoState(item.uid, currentPhotoCount, "已生成")
-                        enqueueRemotePdf(item)
                         _backgroundPdfMessage.value = "盘点单「${item.name}」拍照拼合 PDF 完成！照片拼合生成并自动进行高质无损压缩（体积通常缩减92%以上）。"
                     } else {
                         repository.updatePhotoState(item.uid, currentPhotoCount, "未生成")
+                        repository.cancelUploadForStock(item.uid)
                     }
                 } else {
                     repository.updatePhotoState(item.uid, 0, "未生成")
+                    repository.cancelUploadForStock(item.uid)
                 }
             }
         } else {
@@ -360,10 +368,21 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
     fun applyFilterToPhoto(file: File, filterType: String) {
         val activeItem = _activeItemForPhoto.value ?: return
         viewModelScope.launch(Dispatchers.IO) {
-            repository.applyImageFilter(file, filterType)
+            val result = repository.applyImageFilter(file, filterType)
+            val regeneratedPdf = if (result != null) repository.generatePdfForItem(context, activeItem) else null
+            if (result == null || regeneratedPdf == null) repository.cancelUploadForStock(activeItem.uid)
             withContext(Dispatchers.Main) {
                 refreshActiveSessionPhotos(activeItem.uid)
-                Toast.makeText(context, "滤镜渲染与黑白防噪美化处理生效！", Toast.LENGTH_SHORT).show()
+                val success = result != null && regeneratedPdf != null
+                Toast.makeText(
+                    context,
+                    when {
+                        result == null -> "滤镜处理失败，原照片已保留"
+                        regeneratedPdf == null -> "照片已处理，但 PDF 生成失败，请重新生成"
+                        else -> "滤镜渲染与黑白防噪美化处理生效！"
+                    },
+                    if (success) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
+                ).show()
             }
         }
     }
@@ -390,9 +409,21 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
             File(context.filesDir, "pdfs/${item.uid}").deleteRecursively()
             File(context.filesDir, "photos/${item.uid}").deleteRecursively()
             repository.updatePhotoState(item.uid, 0, "未生成")
+            repository.cancelUploadForStock(item.uid)
             withContext(Dispatchers.Main) {
                 Toast.makeText(context, "已成功清除「${item.name}」的全部照片和PDF数据", Toast.LENGTH_SHORT).show()
             }
+        }
+    }
+
+    /** Clears all media for a confirmed retake while cancelling any pending remote upload. */
+    fun retakeItem(item: StockItem) {
+        viewModelScope.launch(Dispatchers.IO) {
+            File(context.filesDir, "pdfs/${item.uid}").deleteRecursively()
+            File(context.filesDir, "photos/${item.uid}").deleteRecursively()
+            repository.updatePhotoState(item.uid, 0, "未生成")
+            repository.cancelUploadForStock(item.uid)
+            withContext(Dispatchers.Main) { refreshActiveSessionPhotos(item.uid) }
         }
     }
 
@@ -408,10 +439,14 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
             repository.renumberPhotos(context, activeItem.uid)
             val currentPhotoCount = repository.countPhotos(context, activeItem.uid)
             if (currentPhotoCount > 0) {
-                repository.generatePdfForItem(context, activeItem)
-                enqueueRemotePdf(activeItem)
+                val regeneratedPdf = repository.generatePdfForItem(context, activeItem)
+                if (regeneratedPdf == null || !regeneratedPdf.exists()) {
+                    repository.cancelUploadForStock(activeItem.uid)
+                }
             } else {
+                File(context.filesDir, "pdfs/${activeItem.uid}").deleteRecursively()
                 repository.updatePhotoState(activeItem.uid, 0, "未生成")
+                repository.cancelUploadForStock(activeItem.uid)
             }
             withContext(Dispatchers.Main) {
                 refreshActiveSessionPhotos(activeItem.uid)
@@ -428,11 +463,13 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             val success = repository.cropImageFile(file, topPct, bottomPct, leftPct, rightPct)
             if (success) {
-                repository.generatePdfForItem(context, activeItem)
-                enqueueRemotePdf(activeItem)
+                val regeneratedPdf = repository.generatePdfForItem(context, activeItem)
+                if (regeneratedPdf == null || !regeneratedPdf.exists()) {
+                    repository.cancelUploadForStock(activeItem.uid)
+                }
                 withContext(Dispatchers.Main) {
                     refreshActiveSessionPhotos(activeItem.uid)
-                    Toast.makeText(context, "纸张裁剪与图像校正切边在App中生效！", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, if (regeneratedPdf != null) "纸张裁剪与图像校正切边在App中生效！" else "裁剪已完成，但 PDF 生成失败，请重新生成", Toast.LENGTH_SHORT).show()
                 }
             } else {
                 withContext(Dispatchers.Main) {
@@ -455,9 +492,10 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun updateItem(item: StockItem) {
         viewModelScope.launch(Dispatchers.IO) {
-            // A remote binding owns the shouldCheck flag; local UI cannot opt it out.
-            val isRemoteBound = remoteSyncDao.bindingsForProject(item.projectId).any { it.stockUid == item.uid }
-            repository.insertItem(if (isRemoteBound) item.copy(shouldCheck = true) else item)
+            // Preserve the synchronized value, including inactive/conflicted history records.
+            val binding = remoteSyncDao.bindingsForProject(item.projectId).firstOrNull { it.stockUid == item.uid }
+            val current = repository.getItemsByProjectSync(item.projectId).firstOrNull { it.uid == item.uid }
+            repository.insertItem(if (binding != null) item.copy(shouldCheck = current?.shouldCheck ?: false) else item)
         }
     }
 
@@ -473,7 +511,7 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
             targetFile.parentFile?.mkdirs()
 
             try {
-                val bitmap = android.graphics.Bitmap.createBitmap(1080, 1080, android.graphics.Bitmap.Config.ARGB_8888)
+                val bitmap = createBitmap(1080, 1080)
                 val canvas = android.graphics.Canvas(bitmap)
                 val paint = android.graphics.Paint()
 
@@ -593,6 +631,8 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _wifiPort = MutableStateFlow(9090)
     val wifiPort = _wifiPort.asStateFlow()
+    private val _wifiPairingToken = MutableStateFlow<String?>(null)
+    val wifiPairingToken = _wifiPairingToken.asStateFlow()
 
     fun updateWifiPort(port: Int) {
         _wifiPort.value = port
@@ -628,9 +668,11 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             wifiServer?.start(portVal)
+            _wifiPairingToken.value = wifiServer?.getPairingToken()
         } else {
             wifiServer?.stop()
             wifiServer = null
+            _wifiPairingToken.value = null
             _deviceIpAddress.value = null
         }
     }
@@ -708,12 +750,6 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Adds a generated PDF to the durable remote upload queue when the asset is remotely bound. */
-    fun enqueueRemotePdf(item: StockItem) {
-        viewModelScope.launch(Dispatchers.IO) {
-            RemoteUploadRepository(context).enqueuePdf(item.projectId, item.uid)
-        }
-    }
 
     /**
      * Simple manual build controller.
@@ -723,7 +759,6 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
             val freshPdf = repository.generatePdfForItem(context, item)
             withContext(Dispatchers.Main) {
                 if (freshPdf != null && freshPdf.exists()) {
-                    enqueueRemotePdf(item)
                     Toast.makeText(context, "PDF 合并生成成功！", Toast.LENGTH_SHORT).show()
                 } else {
                     Toast.makeText(context, "生成 PDF 失败（请先拍照）", Toast.LENGTH_SHORT).show()
@@ -802,6 +837,7 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearAll() {
         viewModelScope.launch(Dispatchers.IO) {
+            repository.listProjectsSync().forEach { UploadWorkScheduler.cancelRetry(context, it.id) }
             repository.deleteAll()
             File(context.filesDir, "photos").deleteRecursively()
             File(context.filesDir, "pdfs").deleteRecursively()

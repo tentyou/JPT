@@ -3,6 +3,6 @@
     <item
         android:width="66dp"
         android:height="66dp"
-        android:drawable="@drawable/dianjian_icon_1780031051039"
+        android:drawable="@drawable/dianjian_icon"
         android:gravity="center" />
 </layer-list>

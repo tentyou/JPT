@@ -16,3 +16,24 @@
 local.properties
 .env
 debug.keystore
+
+# Credentials, local captures and test media
+*.jks
+*.keystore
+*.p12
+cookies.txt
+*.cookies
+*.har
+*-login.png
+photos/
+pdfs/
+test-data/photos/
+test-data/pdfs/
+
+# Local diagnostics, databases and environment overrides
+.tmp_debug/
+.env.*
+!.env.example
+*.db
+*.db-shm
+*.db-wal

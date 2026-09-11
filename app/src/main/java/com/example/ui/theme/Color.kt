@@ -2,10 +2,13 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val Purple80 = Color(0xFFD0BCFF)
-val PurpleGrey80 = Color(0xFFCCC2DC)
-val Pink80 = Color(0xFFEFB8C8)
-
-val Purple40 = Color(0xFF6650a4)
-val PurpleGrey40 = Color(0xFF625b71)
-val Pink40 = Color(0xFF7D5260)
+/** Tenken's field-work palette: ink for trust, teal for action, amber for attention. */
+val TenkenInk = Color(0xFF183B56)
+val TenkenTeal = Color(0xFF0F766E)
+val TenkenMint = Color(0xFFD8F3F0)
+val TenkenAmber = Color(0xFFB45309)
+val TenkenSand = Color(0xFFFFE6BD)
+val TenkenCanvas = Color(0xFFF6F8F7)
+val TenkenOutline = Color(0xFF6E7D7B)
+val TenkenNight = Color(0xFF0E1718)
+val TenkenNightSurface = Color(0xFF142223)

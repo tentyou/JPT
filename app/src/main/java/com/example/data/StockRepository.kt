@@ -1,8 +1,13 @@
 package com.example.data
 
 import android.content.Context
+import androidx.core.content.edit
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.scale
 import android.graphics.BitmapFactory
 import android.graphics.pdf.PdfDocument
+import android.graphics.pdf.PdfRenderer
+import android.os.ParcelFileDescriptor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
@@ -15,13 +20,17 @@ import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.util.Locale
 import java.util.UUID
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 class StockRepository(
     private val stockItemDao: StockItemDao,
-    private val projectDao: ProjectDao
+    private val projectDao: ProjectDao,
+    private val remoteSyncDao: RemoteSyncDao? = null
 ) {
 
     fun toJsonList(list: List<String>): String {
@@ -407,6 +416,9 @@ class StockRepository(
             File(context.filesDir, "photos/${item.uid}").deleteRecursively()
         }
         stockItemDao.deleteItemsByProject(project.id)
+        remoteSyncDao?.deleteBindingsForProject(project.id)
+        remoteSyncDao?.deleteUploadTasksForProject(project.id)
+        remoteSyncDao?.deleteProjectLink(project.id)
         projectDao.deleteProject(project)
     }
 
@@ -464,10 +476,23 @@ class StockRepository(
 
     suspend fun deleteAll() = withContext(Dispatchers.IO) {
         stockItemDao.deleteAll()
+        remoteSyncDao?.deleteAllBindings()
+        remoteSyncDao?.deleteAllUploadTasks()
+        remoteSyncDao?.deleteAllProjectLinks()
     }
 
+    suspend fun clearRemoteSyncData() = withContext(Dispatchers.IO) {
+        remoteSyncDao?.deleteAllBindings()
+        remoteSyncDao?.deleteAllUploadTasks()
+        remoteSyncDao?.deleteAllProjectLinks()
+    }
     suspend fun deleteItem(item: StockItem) = withContext(Dispatchers.IO) {
         stockItemDao.deleteItem(item)
+        remoteSyncDao?.deleteUploadTaskForStockUid(item.uid)
+    }
+
+    suspend fun cancelUploadForStock(stockUid: String) = withContext(Dispatchers.IO) {
+        remoteSyncDao?.deleteUploadTaskForStockUid(stockUid)
     }
 
     suspend fun getItemByUid(uid: String): StockItem? = withContext(Dispatchers.IO) {
@@ -893,8 +918,11 @@ class StockRepository(
         
         // Output PDF named as photos.pdf or 照片.pdf, let's use the standard "照片.pdf"
         val pdfFile = File(pdfDir, "照片.pdf")
+        val tempPdfFile = File(pdfDir, ".照片.pdf.${UUID.randomUUID()}.tmp")
 
         val pdfDocument = PdfDocument()
+        var writtenPages = 0
+        var unreadableImage = false
         try {
             val project = projectDao.getProjectById(item.projectId) ?: Project(id = item.projectId, name = "默认项目")
             val isWatermarkEnabled = project.watermarkEnabled
@@ -903,13 +931,17 @@ class StockRepository(
                 val allProjectItems = getItemsByProjectSync(item.projectId).filter { it.category == item.category }
                 val sortedItems = allProjectItems.sortedBy { it.originalCode.ifEmpty { it.uid } }
                 val index = sortedItems.indexOfFirst { it.uid == item.uid }
-                val sequenceStr = String.format("%04d", if (index != -1) index + 1 else 1)
+                val sequenceStr = String.format(Locale.ROOT, "%04d", if (index != -1) index + 1 else 1)
                 "$prefix-$sequenceStr"
             } else null
 
             for (imageFile in imageFiles) {
                 // Resize during load to ensure extremely low RAM and compact file footprint
-                val bitmap = getResizedBitmap(imageFile.absolutePath, 1200) ?: continue
+                val bitmap = getResizedBitmap(imageFile.absolutePath, 1200)
+                if (bitmap == null) {
+                    unreadableImage = true
+                    continue
+                }
                 
                 // Keep clean aspect ratio sized dynamic page without redundant white bleed footers
                 val pageInfo = PdfDocument.PageInfo.Builder(bitmap.width, bitmap.height, 1).create()
@@ -961,7 +993,11 @@ class StockRepository(
                         linesList.add("时间：${photoMeta.timeStr}")
                     }
                     if (project.watermarkBlShowGps) {
-                        linesList.add(String.format(java.util.Locale.CHINA, "经度：%.2f  纬度：%.2f", photoMeta.longitude, photoMeta.latitude))
+                        if (photoMeta.hasLocation) {
+                            linesList.add(String.format(java.util.Locale.CHINA, "经度：%.2f  纬度：%.2f", photoMeta.longitude, photoMeta.latitude))
+                        } else {
+                            linesList.add("经纬度：未获取定位")
+                        }
                     }
                     if (project.watermarkBlShowAddress) {
                         linesList.add("位置：${photoMeta.address}")
@@ -1017,20 +1053,38 @@ class StockRepository(
                 }
 
                 pdfDocument.finishPage(page)
+                writtenPages++
                 bitmap.recycle()
             }
             
-            FileOutputStream(pdfFile).use { fos ->
+            if (unreadableImage || writtenPages == 0) {
+                updatePhotoState(item.uid, writtenPages, "生成失败：照片无法读取")
+                return@withContext null
+            }
+            FileOutputStream(tempPdfFile).use { fos ->
                 pdfDocument.writeTo(fos)
             }
-            
-            // Update SQLite Room records
-            updatePhotoState(item.uid, imageFiles.size, "已生成")
+            val validPdf = try {
+                ParcelFileDescriptor.open(tempPdfFile, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+                    PdfRenderer(descriptor).use { renderer -> renderer.pageCount == writtenPages }
+                }
+            } catch (_: Exception) {
+                false
+            }
+            if (!tempPdfFile.isFile || tempPdfFile.length() <= 0L || !validPdf) {
+                updatePhotoState(item.uid, writtenPages, "生成失败：PDF 无效")
+                return@withContext null
+            }
+            Files.move(tempPdfFile.toPath(), pdfFile.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+            // Update SQLite Room records only after the atomic replacement succeeds
+            updatePhotoState(item.uid, writtenPages, "已生成")
             return@withContext pdfFile
         } catch (e: Exception) {
             e.printStackTrace()
+            updatePhotoState(item.uid, writtenPages, "生成失败：${e.message ?: "未知错误"}")
             return@withContext null
         } finally {
+            if (tempPdfFile.exists()) tempPdfFile.delete()
             pdfDocument.close()
         }
     }
@@ -1070,7 +1124,7 @@ class StockRepository(
         } else {
             val targetWidth = (currentWidth * scale).toInt()
             val targetHeight = (currentHeight * scale).toInt()
-            val result = android.graphics.Bitmap.createScaledBitmap(decodedBitmap, targetWidth, targetHeight, true)
+            val result = decodedBitmap.scale(targetWidth, targetHeight, true)
             if (result != decodedBitmap) {
                 decodedBitmap.recycle()
             }
@@ -1079,15 +1133,15 @@ class StockRepository(
 
         // Apply rotation to match original EXIF orientation
         return try {
-            val exifInterface = android.media.ExifInterface(imagePath)
+            val exifInterface = androidx.exifinterface.media.ExifInterface(imagePath)
             val orientation = exifInterface.getAttributeInt(
-                android.media.ExifInterface.TAG_ORIENTATION,
-                android.media.ExifInterface.ORIENTATION_NORMAL
+                androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION,
+                androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
             )
             val rotationDegrees = when (orientation) {
-                android.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
-                android.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
-                android.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
+                androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
+                androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
+                androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
                 else -> 0
             }
             if (rotationDegrees != 0) {
@@ -1112,70 +1166,65 @@ class StockRepository(
     /**
      * Applies optical enhancement filters like grayscale, high contrast mono, or brightness boost.
      */
-    fun applyImageFilter(imageFile: File, filterType: String): File {
-        try {
-            val bitmap = BitmapFactory.decodeFile(imageFile.absolutePath) ?: return imageFile
-            val width = bitmap.width
-            val height = bitmap.height
-            val resultBitmap = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
+    fun applyImageFilter(imageFile: File, filterType: String): File? {
+        if (!imageFile.isFile) return null
+        val tempFile = File(imageFile.parentFile, ".${imageFile.name}.${UUID.randomUUID()}.tmp")
+        var sourceBitmap: android.graphics.Bitmap? = null
+        var resultBitmap: android.graphics.Bitmap? = null
+        return try {
+            sourceBitmap = BitmapFactory.decodeFile(imageFile.absolutePath) ?: return null
+            val width = sourceBitmap.width
+            val height = sourceBitmap.height
+            resultBitmap = createBitmap(width, height)
             val canvas = android.graphics.Canvas(resultBitmap)
             val paint = android.graphics.Paint()
-            
             when (filterType) {
                 "grayscale" -> {
-                    val colorMatrix = android.graphics.ColorMatrix().apply {
-                        setSaturation(0f)
-                    }
-                    paint.colorFilter = android.graphics.ColorMatrixColorFilter(colorMatrix)
-                    canvas.drawBitmap(bitmap, 0f, 0f, paint)
+                    paint.colorFilter = android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix().apply { setSaturation(0f) })
+                    canvas.drawBitmap(sourceBitmap, 0f, 0f, paint)
                 }
                 "bw" -> {
-                    // Turn gray levels directly into deep black & bright white Document look
                     val colorMatrix = android.graphics.ColorMatrix().apply {
-                        setSaturation(0f)
-                        val scale = 3.0f
-                        val translate = -220f
-                        val matrixVals = floatArrayOf(
-                            scale, 0f, 0f, 0f, translate,
-                            0f, scale, 0f, 0f, translate,
-                            0f, 0f, scale, 0f, translate,
+                        set(floatArrayOf(
+                            3f, 0f, 0f, 0f, -220f,
+                            0f, 3f, 0f, 0f, -220f,
+                            0f, 0f, 3f, 0f, -220f,
                             0f, 0f, 0f, 1f, 0f
-                        )
-                        set(matrixVals)
+                        ))
                     }
                     paint.colorFilter = android.graphics.ColorMatrixColorFilter(colorMatrix)
-                    canvas.drawBitmap(bitmap, 0f, 0f, paint)
+                    canvas.drawBitmap(sourceBitmap, 0f, 0f, paint)
                 }
                 "magic" -> {
-                    // Magic optical color document look (Contrast and brightness boost)
                     val colorMatrix = android.graphics.ColorMatrix().apply {
-                        val scale = 1.4f
-                        val translate = 40f
-                        val matrixVals = floatArrayOf(
-                            scale, 0f, 0f, 0f, translate,
-                            0f, scale, 0f, 0f, translate,
-                            0f, 0f, scale, 0f, translate,
+                        set(floatArrayOf(
+                            1.4f, 0f, 0f, 0f, 40f,
+                            0f, 1.4f, 0f, 0f, 40f,
+                            0f, 0f, 1.4f, 0f, 40f,
                             0f, 0f, 0f, 1f, 0f
-                        )
-                        set(matrixVals)
+                        ))
                     }
                     paint.colorFilter = android.graphics.ColorMatrixColorFilter(colorMatrix)
-                    canvas.drawBitmap(bitmap, 0f, 0f, paint)
+                    canvas.drawBitmap(sourceBitmap, 0f, 0f, paint)
                 }
-                else -> { // "original"
-                    canvas.drawBitmap(bitmap, 0f, 0f, paint)
-                }
+                else -> canvas.drawBitmap(sourceBitmap, 0f, 0f, paint)
             }
-            
-            FileOutputStream(imageFile).use { out ->
+            val compressed = FileOutputStream(tempFile).use { out ->
                 resultBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 88, out)
             }
-            bitmap.recycle()
-            resultBitmap.recycle()
-        } catch (e: Exception) {
-            e.printStackTrace()
+            if (!compressed || !tempFile.isFile || tempFile.length() <= 0L) {
+                null
+            } else {
+                Files.move(tempFile.toPath(), imageFile.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+                imageFile.takeIf { it.isFile && it.length() > 0L }
+            }
+        } catch (_: Exception) {
+            null
+        } finally {
+            sourceBitmap?.recycle()
+            resultBitmap?.recycle()
+            if (tempFile.exists()) tempFile.delete()
         }
-        return imageFile
     }
 
     /**
@@ -1221,7 +1270,7 @@ class StockRepository(
      */
     fun saveCategoryPrefix(context: Context, category: String, prefix: String) {
         val prefs = context.getSharedPreferences("category_prefixes_prefs", Context.MODE_PRIVATE)
-        prefs.edit().putString(category, prefix).apply()
+        prefs.edit { putString(category, prefix) }
     }
 
     /**
@@ -1243,7 +1292,7 @@ class StockRepository(
 
             // Target sequential naming phase
             tempFiles.forEachIndexed { index, file ->
-                val targetName = String.format("%04d.jpg", index + 1)
+                val targetName = String.format(Locale.ROOT, "%04d.jpg", index + 1)
                 val targetFile = File(photoDir, targetName)
                 file.renameTo(targetFile)
             }
@@ -1256,6 +1305,7 @@ class StockRepository(
      * Applies physical cropping border adjustments to a specific photograph file
      */
     fun cropImageFile(file: File, topPct: Float, bottomPct: Float, leftPct: Float, rightPct: Float): Boolean {
+        val tempFile = File(file.parentFile, "." + file.name + "." + UUID.randomUUID() + ".tmp")
         return try {
             val bitmap = BitmapFactory.decodeFile(file.absolutePath) ?: return false
             val width = bitmap.width
@@ -1263,10 +1313,8 @@ class StockRepository(
 
             val cropLeft = (width * (leftPct / 100f)).toInt().coerceIn(0, width - 1)
             val cropTop = (height * (topPct / 100f)).toInt().coerceIn(0, height - 1)
-            
             val cropRight = (width * (1f - rightPct / 100f)).toInt().coerceIn(cropLeft + 10, width)
             val cropBottom = (height * (1f - bottomPct / 100f)).toInt().coerceIn(cropTop + 10, height)
-
             val targetW = cropRight - cropLeft
             val targetH = cropBottom - cropTop
 
@@ -1276,18 +1324,25 @@ class StockRepository(
             }
 
             val croppedBitmap = android.graphics.Bitmap.createBitmap(bitmap, cropLeft, cropTop, targetW, targetH)
-            FileOutputStream(file).use { out ->
+            val compressed = FileOutputStream(tempFile).use { out ->
                 croppedBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, out)
             }
+            if (!compressed || !tempFile.isFile || tempFile.length() <= 0L) {
+                bitmap.recycle()
+                croppedBitmap.recycle()
+                tempFile.delete()
+                return false
+            }
+            Files.move(tempFile.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
             bitmap.recycle()
             croppedBitmap.recycle()
             true
         } catch (e: Exception) {
             e.printStackTrace()
+            tempFile.delete()
             false
         }
     }
-
     /**
      * Compresses all inventory-generated folders and generated PDFs into a single ZIP file.
      * The ZIP layout strictly conforms to the requested directory hierarchy:
@@ -1296,7 +1351,8 @@ class StockRepository(
      * Root Level compiles:
      *   盘点表.csv (with UTF-8 BOM, including UUID, Photo Count, and generated PDF filename)
      */
-    suspend fun createExportZip(context: Context, items: List<StockItem>, outputZipFile: File): Boolean = withContext(Dispatchers.IO) {
+    suspend fun createExportZip(context: Context, sourceItems: List<StockItem>, outputZipFile: File, includeHistory: Boolean = false): Boolean = withContext(Dispatchers.IO) {
+        val items = if (includeHistory) sourceItems else sourceItems.filter { it.shouldCheck }
         if (items.isEmpty()) return@withContext false
 
         try {
@@ -1319,7 +1375,7 @@ class StockRepository(
                     val prefix = getCategoryPrefix(context, category)
 
                     sortedItems.forEachIndexed { index, item ->
-                        val sequenceStr = String.format("%04d", index + 1)
+                        val sequenceStr = String.format(Locale.ROOT, "%04d", index + 1)
                         val pdfFileName = "$prefix $sequenceStr ${item.name}.pdf"
 
                         val pdfFile = File(context.filesDir, "pdfs/${item.uid}/照片.pdf")

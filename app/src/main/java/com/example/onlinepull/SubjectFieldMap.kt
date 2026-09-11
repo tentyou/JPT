@@ -227,7 +227,9 @@ object SubjectFieldMap {
 
     /** 判断某行数据中「是否盘点」列的值是否为 true */
     fun isCheckTrue(value: String?): Boolean {
-        if (value == null) return false
-        return CHECK_TRUE_VALUES.contains(value.trim())
+        val normalized = value?.trim()?.lowercase() ?: return false
+        if (normalized in setOf("是", "1", "true", "y", "yes", "√", "✓", "需要", "需要盘点")) return true
+        // Some JSON serializers encode an integer flag as 1.0.
+        return normalized.toDoubleOrNull() == 1.0
     }
 }

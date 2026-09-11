@@ -29,6 +29,9 @@ interface StockItemDao {
     @Update
     suspend fun updateItem(item: StockItem)
 
+    @Query("UPDATE stock_items SET shouldCheck = :shouldCheck WHERE uid = :uid")
+    suspend fun updateShouldCheck(uid: String, shouldCheck: Boolean)
+
     @Query("UPDATE stock_items SET photoCount = :photoCount, pdfStatus = :pdfStatus WHERE uid = :uid")
     suspend fun updatePhotoState(uid: String, photoCount: Int, pdfStatus: String)
 
