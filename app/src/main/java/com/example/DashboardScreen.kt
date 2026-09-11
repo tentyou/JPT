@@ -63,6 +63,9 @@ import androidx.core.content.ContextCompat
 import androidx.core.graphics.createBitmap
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import com.example.data.InventorySampling
+import com.example.data.InventoryTemplate
+import com.example.data.SamplingMethod
 import com.example.data.StockItem
 import com.example.onlinepull.AutoOnlinePullScreen
 import com.example.ui.StockViewModel
@@ -92,6 +95,8 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
     val isWatermarking by viewModel.isWatermarking.collectAsStateWithLifecycle()
 
     val currentProject = allProjects.find { it.id == activeProjectId }
+    val currentTemplateHeadersJson by rememberUpdatedState(currentProject?.columnHeadersJson)
+    val transferAddress by viewModel.wifiTransferAddress.collectAsStateWithLifecycle()
     val currentProjectName = currentProject?.name ?: "默认项目"
 
     var showClearConfirmDialog by remember { mutableStateOf(false) }
@@ -102,6 +107,20 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
     var showEditMetaDialog by remember { mutableStateOf(false) }
     var pendingImportUri by remember { mutableStateOf<Uri?>(null) }
     var showWatermarkSettingsPage by remember { mutableStateOf(false) }
+
+    var showSamplingDialog by remember { mutableStateOf(false) }
+    var selectedSamplingCategory by remember { mutableStateOf("") }
+    var selectedSamplingMethod by remember { mutableStateOf(SamplingMethod.ORIGINAL_VALUE_TOP_N) }
+    var samplingPresetCount by remember { mutableStateOf<Int?>(10) }
+    var customSamplingCount by remember { mutableStateOf("") }
+    var samplingTargetRatio by remember { mutableStateOf("70") }
+    var samplingResultMessage by remember { mutableStateOf<String?>(null) }
+    val samplingCategories = remember(stockItems) { InventorySampling.categories(stockItems) }
+    LaunchedEffect(samplingCategories) {
+        if (selectedSamplingCategory !in samplingCategories) {
+            selectedSamplingCategory = samplingCategories.firstOrNull().orEmpty()
+        }
+    }
 
     // Drawer state configuration
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -120,14 +139,13 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
     }
 
     // CSV Template Export Launcher
-    val csvTemplateLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("text/csv")
+    val xlsxTemplateLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument(InventoryTemplate.XLSX_MIME_TYPE)
     ) { uri ->
         if (uri != null) {
             try {
                 context.contentResolver.openOutputStream(uri)?.use { outputStream ->
-                    val csvContent = "\uFEFF序号,设备编号,设备名称,资产分类,规格型号,生产厂家,计量单位,数量,存放位置,购置日期,启用日期,账面原值,账面净值,是否盘点,备注,UUID\n"
-                    outputStream.write(csvContent.toByteArray(Charsets.UTF_8))
+                    outputStream.write(InventoryTemplate.createXlsxBytes(currentTemplateHeadersJson))
                 }
                 Toast.makeText(context, "盘点表模板保存成功！", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
@@ -295,6 +313,162 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
         )
     }
 
+    if (showSamplingDialog) {
+        AlertDialog(
+            onDismissRequest = { showSamplingDialog = false },
+            title = { Text("抽样盘点设置", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "请选择设备分类，并在该分类内执行抽样。抽样结果只替换所选分类内的待盘点状态，其他分类保持不变。",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("设备分类", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                        if (samplingCategories.isEmpty()) {
+                            Text("当前项目暂无可抽样分类。", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                        } else {
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                items(samplingCategories) { category ->
+                                    FilterChip(
+                                        selected = selectedSamplingCategory == category,
+                                        onClick = { selectedSamplingCategory = category },
+                                        label = { Text(category, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("抽样方式", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                        InventorySampling.methods.forEach { method ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { selectedSamplingMethod = method }
+                                    .padding(vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = selectedSamplingMethod == method,
+                                    onClick = { selectedSamplingMethod = method }
+                                )
+                                Text(method.displayName, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                    if (selectedSamplingMethod.requiresCount) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            listOf(10, 50, 100).forEach { count ->
+                                FilterChip(
+                                    selected = samplingPresetCount == count,
+                                    onClick = {
+                                        samplingPresetCount = count
+                                        customSamplingCount = ""
+                                    },
+                                    label = { Text("${count}项") }
+                                )
+                            }
+                        }
+                        OutlinedTextField(
+                            value = customSamplingCount,
+                            onValueChange = { input ->
+                                customSamplingCount = input.filter { it.isDigit() }.take(6)
+                                samplingPresetCount = null
+                            },
+                            label = { Text("自定义数量") },
+                            placeholder = { Text("输入抽样项数") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    if (selectedSamplingMethod.requiresRatio) {
+                        OutlinedTextField(
+                            value = samplingTargetRatio,
+                            onValueChange = { input ->
+                                samplingTargetRatio = input.filter { it.isDigit() || it == '.' }.take(6)
+                            },
+                            label = { Text("目标占比（%）") },
+                            placeholder = { Text("如：70") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    Text(
+                        text = "当前台账共 ${stockItems.size} 项，所选分类共 ${stockItems.count { it.category.trim() == selectedSamplingCategory }} 项。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (stockItems.isEmpty() || selectedSamplingCategory.isBlank()) {
+                            Toast.makeText(context, "当前项目暂无可抽样资产分类。", Toast.LENGTH_SHORT).show()
+                            showSamplingDialog = false
+                            return@Button
+                        }
+                        val requestedCount = if (selectedSamplingMethod.requiresCount) {
+                            samplingPresetCount ?: customSamplingCount.toIntOrNull() ?: 0
+                        } else {
+                            0
+                        }
+                        if (selectedSamplingMethod.requiresCount && requestedCount <= 0) {
+                            Toast.makeText(context, "请输入有效的抽样数量。", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        val targetRatio = samplingTargetRatio.toDoubleOrNull() ?: 0.0
+                        if (selectedSamplingMethod.requiresRatio && targetRatio <= 0.0) {
+                            Toast.makeText(context, "请输入有效的目标占比。", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+
+                        val result = InventorySampling.sample(
+                            allItems = stockItems,
+                            columnHeadersJson = currentTemplateHeadersJson,
+                            category = selectedSamplingCategory,
+                            method = selectedSamplingMethod,
+                            requestedCount = requestedCount,
+                            targetRatioPercent = targetRatio
+                        )
+                        viewModel.updateItems(InventorySampling.applyResultToSelectedCategory(stockItems, result))
+                        samplingResultMessage = result.summaryText()
+                        showSamplingDialog = false
+                    }
+                ) {
+                    Text("确定")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSamplingDialog = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    if (samplingResultMessage != null) {
+        AlertDialog(
+            onDismissRequest = { samplingResultMessage = null },
+            title = { Text("抽样结果", fontWeight = FontWeight.Bold) },
+            text = { Text(samplingResultMessage.orEmpty()) },
+            confirmButton = {
+                Button(onClick = { samplingResultMessage = null }) {
+                    Text("确认")
+                }
+            }
+        )
+    }
+
     // Modal Drawer wrapper
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -394,7 +568,8 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
                                 ) {
                                     Column(modifier = Modifier.padding(6.dp)) {
                                         Text(
-                                            text = "http://$ipAddress:$wifiPort/?token=$wifiPairingToken",
+                                            text = transferAddress ?: "正在准备传输地址…",
+                                            modifier = Modifier.clickable(enabled = transferAddress != null) { viewModel.copyWifiTransferAddress() }.testTag("wifi_sidebar_address"),
                                             style = MaterialTheme.typography.bodySmall,
                                             fontFamily = FontFamily.Monospace,
                                             color = MaterialTheme.colorScheme.primary,
@@ -581,57 +756,9 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
                                     .basicMarquee(iterations = Int.MAX_VALUE)
                             )
                             Spacer(modifier = Modifier.height(2.dp))
-                            // WiFi active dynamic indicator pill on topBar (stacked under title name to avoid changing bar width)
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = if (wifiEnabled) Color(0xFFE8F5E9) else Color(0xFFECEFF1),
-                                modifier = Modifier
-                                    .clickable {
-                                        coroutineScope.launch {
-                                            val targetState = !wifiEnabled
-                                            viewModel.toggleWifiTransfer(targetState, wifiPort)
-                                            Toast.makeText(
-                                                context,
-                                                "WiFi已${if (targetState) "点击开启中" else "点击关闭"}，3秒后提示端口...",
-                                                Toast.LENGTH_SHORT
-                                            ).show()
-                                            delay(3000)
-                                            if (targetState) {
-                                                val freshIp = viewModel.deviceIpAddress.value ?: "127.0.0.1"
-                                                Toast.makeText(
-                                                    context,
-                                                    "WiFi传送端口地址: http://${freshIp}:${wifiPort}/?token=${viewModel.wifiPairingToken.value ?: ""}",
-                                                    Toast.LENGTH_LONG
-                                                ).show()
-                                            } else {
-                                                Toast.makeText(
-                                                    context,
-                                                    "WiFi传送服务已关闭",
-                                                    Toast.LENGTH_SHORT
-                                                ).show()
-                                            }
-                                        }
-                                    }
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(4.dp)
-                                            .clip(CircleShape)
-                                            .background(if (wifiEnabled) Color(0xFF4CAF50) else Color.Gray)
-                                    )
-                                    Spacer(modifier = Modifier.width(3.dp))
-                                    Text(
-                                        text = if (wifiEnabled) "WiFi传输: 开 (${ipAddress ?: "获取中"}:${wifiPort})" else "WiFi传输: 关",
-                                        fontSize = 8.5.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (wifiEnabled) Color(0xFF2E7D32) else Color.DarkGray
-                                    )
-                                }
-                            }
+                            WifiTransferToolbar(wifiEnabled, transferAddress,
+                                onToggle = { viewModel.toggleWifiTransfer(it, wifiPort) },
+                                onCopy = { viewModel.copyWifiTransferAddress() })
                         }
                     },
                     actions = {
@@ -753,103 +880,17 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
                         StatsCategoryCard(
                             onImportClick = { documentImportLauncher.launch(arrayOf("*/*")) },
                             onTemplateClick = {
-                                csvTemplateLauncher.launch("盘点表模板.csv")
+                                xlsxTemplateLauncher.launch("盘点表模板.xlsx")
                             },
                             onOnlinePullClick = onOpenOnlinePull
                         )
                         Spacer(modifier = Modifier.height(10.dp))
                     }
 
-                    // Project Assessment Metadata Setup Card
                     item {
-                        ElevatedCard(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 6.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.elevatedCardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
-                            )
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .padding(14.dp)
-                                    .fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.padding(bottom = 8.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Style,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text(
-                                            text = "设置信息",
-                                            style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
-
-                                    val baseDateVal = currentProject?.baseDate ?: "未设定"
-                                    val companyVal = currentProject?.companyName ?: "未设定"
-                                    val rTypeVal = currentProject?.reportType ?: "评估报告"
-
-                                    Text(
-                                        text = "📅 评估基准日: $baseDateVal",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier.padding(vertical = 2.dp)
-                                    )
-                                    Text(
-                                        text = "🏢 持有单位: $companyVal",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier.padding(vertical = 2.dp),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = "📝 报告类型: $rTypeVal",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier.padding(vertical = 2.dp)
-                                    )
-                                }
-
-                                Button(
-                                    onClick = { showEditMetaDialog = true },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)
-                                    ),
-                                    shape = RoundedCornerShape(8.dp),
-                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                                    modifier = Modifier
-                                        .testTag("edit_meta_btn")
-                                        .padding(start = 12.dp)
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            imageVector = Icons.Default.Edit,
-                                            contentDescription = "修改",
-                                            modifier = Modifier.size(14.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("修改", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                }
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(10.dp))
+                        ProjectInfoCard(currentProject, remoteLink != null) { showEditMetaDialog = true }
+                        Spacer(Modifier.height(12.dp))
                     }
-
                     // Camera Watermarks Configuration & Live Preview Card
                     item {
                         val watermarkEnabled by viewModel.watermarkEnabled.collectAsStateWithLifecycle()
@@ -1004,6 +1045,9 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
                     val checkedCount = mainCheckList.size
                     val totalCount = stockItems.size
 
+                    if (remoteLink == null) {
+                        item { OutlinedButton(onClick = { showSamplingDialog = true }, modifier = Modifier.testTag("sampling_button")) { Text("分类抽样") } }
+                    }
                     // Tab switching rows: 0 = 待盘点设备(filtered shouldCheck == true), 1 = 全量台账(show checkboxes)
                     item {
                         TabRow(
@@ -1362,17 +1406,19 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(imageVector = Icons.Default.Edit, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("设定设置信息", fontWeight = FontWeight.Bold)
+                    Text("编辑项目信息", fontWeight = FontWeight.Bold)
                 }
             },
             text = {
                 Column(modifier = Modifier.fillMaxWidth()) {
+                    if (remoteLink != null) Text("建议保持线上项目信息。此处修改仅在本机生效，后续同步不会覆盖。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 12.dp))
+
                     Box(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                         OutlinedTextField(
                             value = baseDateState,
                             onValueChange = { },
                             readOnly = true,
-                            label = { Text("评估基准日", fontSize = 12.sp) },
+                            label = { Text(if (selectedReportTypeOption == "评估报告") "评估基准日" else "基准日", fontSize = 12.sp) },
                             placeholder = { Text("点击选择日期", color = Color.Gray, fontSize = 12.sp) },
                             trailingIcon = {
                                 Icon(
@@ -1397,7 +1443,7 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
                     OutlinedTextField(
                         value = companyNameState,
                         onValueChange = { companyNameState = it },
-                        label = { Text("被评估/产权持有单位名称", fontSize = 12.sp) },
+                        label = { Text(if (selectedReportTypeOption == "评估报告") "被评估单位" else "产权持有单位", fontSize = 12.sp) },
                         placeholder = { Text("如：华东科技集团有限公司", color = Color.Gray, fontSize = 12.sp) },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1524,7 +1570,7 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
                             value = baseDateState,
                             onValueChange = { },
                             readOnly = true,
-                            label = { Text("评估基准日", fontSize = 12.sp) },
+                            label = { Text(if (selectedReportTypeOption == "评估报告") "评估基准日" else "基准日", fontSize = 12.sp) },
                             placeholder = { Text("点击选择日期", color = Color.Gray, fontSize = 12.sp) },
                             trailingIcon = {
                                 Icon(
@@ -1547,7 +1593,7 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
                     OutlinedTextField(
                         value = companyNameState,
                         onValueChange = { companyNameState = it },
-                        label = { Text("被评估/产权持有单位名称", fontSize = 12.sp) },
+                        label = { Text(if (selectedReportTypeOption == "评估报告") "被评估单位" else "产权持有单位", fontSize = 12.sp) },
                         placeholder = { Text("如：华东科技集团有限公司", color = Color.Gray, fontSize = 12.sp) },
                         modifier = Modifier
                             .fillMaxWidth()

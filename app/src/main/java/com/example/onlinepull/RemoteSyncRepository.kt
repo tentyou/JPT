@@ -36,6 +36,8 @@ class RemoteSyncRepository(
                 try {
                     onProgress("读取公司列表…")
                     val companies = client.listCompanies(project.id)
+                    onProgress("读取项目设置…")
+                    val metadata = client.projectMetadata(project, companies)
                     val rows = mutableListOf<RemoteInventoryItem>()
                     var subjectCount = 0
                     companies.forEachIndexed { companyIndex, company ->
@@ -51,7 +53,7 @@ class RemoteSyncRepository(
                     }
                     currentCoroutineContext().ensureActive()
                     onProgress("完整清单已读取，正在保存…")
-                    commit(project, companies.size, subjectCount, rows)
+                    commit(project, companies.size, subjectCount, rows, metadata)
                 } catch (error: Exception) {
                     withContext(NonCancellable) {
                         // Failure markers do not change the last complete snapshot or local evidence.
@@ -67,7 +69,7 @@ class RemoteSyncRepository(
             }
         }
 
-    private suspend fun commit(project: RemoteProjectSummary, companyCount: Int, subjectCount: Int, rows: List<RemoteInventoryItem>): SyncReport =
+    private suspend fun commit(project: RemoteProjectSummary, companyCount: Int, subjectCount: Int, rows: List<RemoteInventoryItem>, metadata: RemoteProjectMetadata): SyncReport =
         db.withTransaction {
             val now = System.currentTimeMillis()
             val oldLink = remoteDao.findProjectByRemoteId(project.id)
@@ -145,7 +147,12 @@ class RemoteSyncRepository(
                 remoteDao.upsertBindings(listOf(it.copy(active = false, syncState = "inactive", lastSyncedAt = now)))
                 stockDao.updateShouldCheck(it.stockUid, false)
             }
-            projectDao.insertProject(localProject.copy(name = project.name))
+            val updatedProject = if (localProject.metadataLocallyEdited) localProject else localProject.copy(
+                baseDate = metadata.baseDate.ifBlank { localProject.baseDate },
+                companyName = metadata.companyName.ifBlank { localProject.companyName },
+                reportType = metadata.reportType.ifBlank { localProject.reportType }
+            )
+            projectDao.insertProject(updatedProject.copy(name = project.name))
             if (pendingItems.isNotEmpty()) stockDao.insertAll(pendingItems)
             if (bindings.isNotEmpty()) remoteDao.upsertBindings(bindings)
             remoteDao.upsertProjectLink(RemoteProjectLink(localProjectId, project.id, project.code, project.name, now, "synced", null))

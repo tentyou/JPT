@@ -4,7 +4,7 @@ import kotlinx.coroutines.ensureActive
 import org.json.JSONArray
 import org.json.JSONObject
 
-data class RemoteProjectSummary(val id: String, val name: String, val code: String = "")
+data class RemoteProjectSummary(val id: String, val name: String, val code: String = "", val evaluationBaseDateMillis: String = "")
 data class RemoteCompanySummary(val id: String, val name: String)
 data class RemoteSubject(val remoteCode: String, val normalizedCode: String, val name: String, val hasInventoryColumn: Boolean = true) {
     val code: String get() = remoteCode
@@ -21,6 +21,7 @@ class MissingRequiredField(val field: String, message: String = "远端字段缺
 /** One complete project snapshot is the only input the synchronizer commits. */
 interface InventorySource {
     suspend fun listProjects(): List<RemoteProjectSummary>
+    suspend fun projectMetadata(project: RemoteProjectSummary, companies: List<RemoteCompanySummary>): RemoteProjectMetadata = RemoteProjectMetadata()
     suspend fun listCompanies(projectId: String): List<RemoteCompanySummary>
     suspend fun listAssetBasedSubjects(projectId: String, companyId: String): List<RemoteSubject>
     suspend fun listInventoryItems(projectId: String, company: RemoteCompanySummary, subject: RemoteSubject): List<RemoteInventoryItem>
@@ -31,12 +32,17 @@ class AssessmentSystemClient(private val tools: McpTools) : InventorySource {
         val array = tools.callTool("get_my_projects", JSONObject()) as? JSONArray
             ?: throw RemoteParseFailure("项目列表格式不正确")
         val result = objects(array).map {
-            RemoteProjectSummary(required(it, "id"), required(it, "projectName"), cell(it, "projectCode"))
+            RemoteProjectSummary(required(it, "id"), required(it, "projectName"), cell(it, "projectCode"), cell(it, "evaluationBaseDate"))
         }
         if (result.map { it.id }.distinct().size != result.size) throw RemoteParseFailure("项目列表存在重复 ID")
         return result
     }
 
+    override suspend fun projectMetadata(project: RemoteProjectSummary, companies: List<RemoteCompanySummary>): RemoteProjectMetadata {
+        val values = tools.callTool("get_project_context", args(project.id)) as? JSONArray
+            ?: throw RemoteParseFailure("项目设置格式不正确")
+        return RemoteProjectMetadata.parse(values, project.evaluationBaseDateMillis, companies.map { it.name })
+    }
     override suspend fun listCompanies(projectId: String): List<RemoteCompanySummary> {
         val array = tools.callTool("get_project_companies", args(projectId)) as? JSONArray
             ?: throw RemoteParseFailure("公司列表格式不正确")

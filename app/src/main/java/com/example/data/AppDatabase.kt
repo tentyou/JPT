@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [StockItem::class, Project::class, RemoteProjectLink::class, RemoteAssetBinding::class, UploadTask::class],
-    version = 7,
+    version = 8,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -41,6 +41,13 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE projects ADD COLUMN metadataLocallyEdited INTEGER NOT NULL DEFAULT 0")
+                // Preserve project settings entered before automatic MCP metadata was available.
+                db.execSQL("UPDATE projects SET metadataLocallyEdited = 1 WHERE baseDate <> '' OR companyName <> '' OR reportType NOT IN ('', '评估报告')")
+            }
+        }
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -48,7 +55,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "stocktake_database"
                 )
-                    .addMigrations(MIGRATION_5_6, MIGRATION_6_7)
+                    .addMigrations(MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                     .build()
                 INSTANCE = instance
                 instance

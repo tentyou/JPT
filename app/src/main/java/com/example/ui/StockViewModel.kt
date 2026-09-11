@@ -9,6 +9,7 @@ import androidx.core.content.edit
 import androidx.core.graphics.createBitmap
 import androidx.lifecycle.viewModelScope
 import com.example.data.AppDatabase
+import com.example.data.InventoryConstants
 import com.example.data.Project
 import com.example.data.StockItem
 import com.example.data.StockRepository
@@ -17,9 +18,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
-import java.io.FileOutputStream
 import java.util.UUID
+import java.io.FileOutputStream
+import java.io.File
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class StockViewModel(application: Application) : AndroidViewModel(application) {
@@ -34,7 +35,7 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
     val allProjects: StateFlow<List<Project>>
     val activeProject: StateFlow<Project?>
     
-    private val _activeProjectId = MutableStateFlow<String>("default_project")
+    private val _activeProjectId = MutableStateFlow<String>(InventoryConstants.DEFAULT_PROJECT_ID)
     val activeProjectId = _activeProjectId.asStateFlow()
 
     val stockItems: StateFlow<List<StockItem>>
@@ -94,7 +95,7 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
                 withContext(Dispatchers.IO) {
                     try {
                         val allProjectItems = repository.getItemsByProjectSync(pid)
-                        val itemsWithPdf = allProjectItems.filter { it.pdfStatus == "已生成" }
+                        val itemsWithPdf = allProjectItems.filter { it.pdfStatus == InventoryConstants.PDF_STATUS_GENERATED }
                         processedCount = itemsWithPdf.size
                         for (item in itemsWithPdf) {
                             repository.generatePdfForItem(context, item)
@@ -174,7 +175,7 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
                 
                 // Immediately update current PDFs if watermark is enabled
                 val allProjectItems = repository.getItemsByProjectSync(pid)
-                val itemsWithPdf = allProjectItems.filter { it.pdfStatus == "已生成" }
+                val itemsWithPdf = allProjectItems.filter { it.pdfStatus == InventoryConstants.PDF_STATUS_GENERATED }
                 for (item in itemsWithPdf) {
                     repository.generatePdfForItem(context, item)
                 }
@@ -193,7 +194,7 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
                 
                 // Regenerate PDFs
                 val allProjectItems = repository.getItemsByProjectSync(pid)
-                val itemsWithPdf = allProjectItems.filter { it.pdfStatus == "已生成" }
+                val itemsWithPdf = allProjectItems.filter { it.pdfStatus == InventoryConstants.PDF_STATUS_GENERATED }
                 for (item in itemsWithPdf) {
                     repository.generatePdfForItem(context, item)
                 }
@@ -251,9 +252,9 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             val existing = repository.listProjectsSync()
             if (existing.isEmpty()) {
-                val defaultProj = Project(id = "default_project", name = "默认项目")
+                val defaultProj = Project(id = InventoryConstants.DEFAULT_PROJECT_ID, name = InventoryConstants.DEFAULT_PROJECT_NAME)
                 repository.insertProject(defaultProj)
-                _activeProjectId.value = "default_project"
+                _activeProjectId.value = InventoryConstants.DEFAULT_PROJECT_ID
             } else {
                 _activeProjectId.value = existing[0].id
             }
@@ -264,7 +265,7 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
         _activeProjectId.value = projectId
     }
 
-    fun addProject(name: String, baseDate: String = "", companyName: String = "", reportType: String = "评估报告") {
+    fun addProject(name: String, baseDate: String = "", companyName: String = "", reportType: String = InventoryConstants.REPORT_TYPE_EVALUATION) {
         viewModelScope.launch(Dispatchers.IO) {
             val newProj = Project(
                 name = name,
@@ -297,7 +298,8 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
                 repository.insertProject(existing.copy(
                     baseDate = baseDate,
                     companyName = companyName,
-                    reportType = reportType
+                    reportType = reportType,
+                    metadataLocallyEdited = true
                 ))
             }
         }
@@ -344,8 +346,8 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
                 if (currentPhotoCount > 0) {
                     val freshPdf = repository.generatePdfForItem(context, item)
                     if (freshPdf != null && freshPdf.exists()) {
-                        repository.updatePhotoState(item.uid, currentPhotoCount, "已生成")
-                        _backgroundPdfMessage.value = "盘点单「${item.name}」拍照拼合 PDF 完成！照片拼合生成并自动进行高质无损压缩（体积通常缩减92%以上）。"
+                        repository.updatePhotoState(item.uid, currentPhotoCount, InventoryConstants.PDF_STATUS_GENERATED)
+                        _backgroundPdfMessage.value = "资产「${item.name}」的现场照片记录 PDF 已生成。"
                     } else {
                         repository.updatePhotoState(item.uid, currentPhotoCount, "未生成")
                         repository.cancelUploadForStock(item.uid)
@@ -411,7 +413,7 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
             repository.updatePhotoState(item.uid, 0, "未生成")
             repository.cancelUploadForStock(item.uid)
             withContext(Dispatchers.Main) {
-                Toast.makeText(context, "已成功清除「${item.name}」的全部照片和PDF数据", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "已清除「${item.name}」的照片和 PDF 文件。", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -450,7 +452,7 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
             }
             withContext(Dispatchers.Main) {
                 refreshActiveSessionPhotos(activeItem.uid)
-                Toast.makeText(context, "照片已删除并自适应重新连号", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "照片已删除，序号已更新。", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -499,8 +501,14 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updateItems(items: List<StockItem>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.updateLocalSelection(items)
+        }
+    }
+
     /**
-     * Programmatically generates a simulated physical asset photo with a detailed overlay
+     * Imports xlsx or csv by SAF Uri
      */
     fun simulateCapture(item: StockItem) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -634,6 +642,15 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
     private val _wifiPairingToken = MutableStateFlow<String?>(null)
     val wifiPairingToken = _wifiPairingToken.asStateFlow()
 
+    private val _wifiTransferAddress = MutableStateFlow<String?>(null)
+    val wifiTransferAddress = _wifiTransferAddress.asStateFlow()
+
+    fun copyWifiTransferAddress() {
+        val address = _wifiTransferAddress.value ?: return
+        WifiTransferLink.copy(context, address)
+        Toast.makeText(context, "完整传输地址已复制", Toast.LENGTH_SHORT).show()
+    }
+
     fun updateWifiPort(port: Int) {
         _wifiPort.value = port
     }
@@ -642,6 +659,7 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
      * Toggles the WiFi local network files transfer server on the specified port.
      */
     fun toggleWifiTransfer(enable: Boolean, portVal: Int = _wifiPort.value) {
+        if (enable && _wifiTransferEnabled.value) return
         _wifiTransferEnabled.value = enable
         if (enable) {
             _wifiPort.value = portVal
@@ -656,23 +674,26 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
                         selectProject(projId)
                         val proj = repository.getProjectById(projId)
                         if (proj != null) {
-                            Toast.makeText(context, "局域网传送：已同步并选用分类项目「${proj.name}」！", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "已切换至项目「${proj.name}」。", Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
             ) { success, count ->
                 if (success) {
                     viewModelScope.launch(Dispatchers.Main) {
-                        Toast.makeText(context, "通过局域网无线成功导入「$count」条外部资产单据！", Toast.LENGTH_LONG).show()
+                        Toast.makeText(context, "已通过局域网导入 $count 条资产记录。", Toast.LENGTH_LONG).show()
                     }
                 }
             }
             wifiServer?.start(portVal)
             _wifiPairingToken.value = wifiServer?.getPairingToken()
+            _wifiTransferAddress.value = WifiTransferLink.create(ip, portVal, _wifiPairingToken.value)
+            copyWifiTransferAddress()
         } else {
             wifiServer?.stop()
             wifiServer = null
             _wifiPairingToken.value = null
+            _wifiTransferAddress.value = null
             _deviceIpAddress.value = null
         }
     }
@@ -759,7 +780,7 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
             val freshPdf = repository.generatePdfForItem(context, item)
             withContext(Dispatchers.Main) {
                 if (freshPdf != null && freshPdf.exists()) {
-                    Toast.makeText(context, "PDF 合并生成成功！", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "资产记录 PDF 已生成。", Toast.LENGTH_SHORT).show()
                 } else {
                     Toast.makeText(context, "生成 PDF 失败（请先拍照）", Toast.LENGTH_SHORT).show()
                 }
@@ -771,22 +792,37 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
         var pid = _activeProjectId.value
         viewModelScope.launch(Dispatchers.IO) {
             if (pid.isEmpty()) {
-                val defaultProj = Project(id = "default_project", name = "默认项目")
+                val defaultProj = Project(id = InventoryConstants.DEFAULT_PROJECT_ID, name = InventoryConstants.DEFAULT_PROJECT_NAME)
                 repository.insertProject(defaultProj)
-                pid = "default_project"
+                pid = InventoryConstants.DEFAULT_PROJECT_ID
                 withContext(Dispatchers.Main) {
-                    _activeProjectId.value = "default_project"
+                    _activeProjectId.value = InventoryConstants.DEFAULT_PROJECT_ID
                 }
             }
 
-            val headers = listOf("序号", "设备编号", "设备名称", "资产分类", "规格型号", "生产厂家", "计量单位", "数量", "存放位置", "购置日期", "启用日期", "账面原值", "账面净值", "是否盘点", "备注", "UUID")
+            val headers = listOf(
+                "序号",
+                "设备编号",
+                "设备名称",
+                "资产分类",
+                "规格型号",
+                "生产厂家",
+                "计量单位",
+                "数量",
+                "存放位置",
+                "购置日期",
+                "启用日期",
+                "账面原值",
+                "账面净值",
+                "是否盘点",
+                "备注",
+                "UUID"
+            )
             val headersJson = repository.toJsonList(headers)
 
             val proj = repository.getProjectById(pid)
             if (proj != null && proj.columnHeadersJson.isEmpty()) {
-                repository.insertProject(proj.copy(
-                    columnHeadersJson = headersJson
-                ))
+                repository.insertProject(proj.copy(columnHeadersJson = headersJson))
             }
 
             val samples = listOf(
@@ -807,7 +843,7 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
                     originalCode = "HPC-DELL-12",
                     projectId = pid,
                     shouldCheck = true,
-                    originalRowJson = repository.toJsonList(listOf("2", "HPC-DELL-12", "戴尔超算物理刀片服务器", "电子设备类", "PowerEdge MX750c", "戴尔中国", "精", "1", "3号算力机房14架", "2024-01", "2024-02", "320000.00", "260000.00", "是", "核心科学计算", "")),
+                    originalRowJson = repository.toJsonList(listOf("2", "HPC-DELL-12", "戴尔超算物理刀片服务器", "电子设备类", "PowerEdge MX750c", "戴尔中国", "台", "1", "3号算力机房14架", "2024-01", "2024-02", "320000.00", "260000.00", "是", "核心科学计算", "")),
                     rowOrder = 2
                 ),
                 StockItem(
@@ -817,17 +853,17 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
                     originalCode = "BLDG-HQ-01",
                     projectId = pid,
                     shouldCheck = false,
-                    originalRowJson = repository.toJsonList(listOf("3", "BLDG-HQ-01", "研发总装中心主厂房", "房屋建筑物类", "钢混框架架构(地上三层)", "中铁建设", "栋", "1", "园区西北角一号地", "2018-06", "2018-12", "45000000.00", "38000000.00", "否", "资产自用红线内", "")),
+                    originalRowJson = repository.toJsonList(listOf("3", "BLDG-HQ-01", "研发总装中心主厂房", "房屋建筑物类", "钢混框架结构（地上三层）", "中铁建设", "栋", "1", "园区西北角一号地", "2018-06", "2018-12", "45000000.00", "38000000.00", "否", "资产自用红线内", "")),
                     rowOrder = 3
                 ),
                 StockItem(
-                    name = "特斯拉一秒干线物流重卡",
+                    name = "干线物流新能源重卡",
                     category = "运输设备类",
                     location = "园区物流调度室C区",
                     originalCode = "EV-SEMI-05",
                     projectId = pid,
                     shouldCheck = true,
-                    originalRowJson = repository.toJsonList(listOf("4", "EV-SEMI-05", "特斯拉一秒干线物流重卡", "运输设备类", "Semi Type-Class 8", "特斯拉", "辆", "1", "园区物流调度室C区", "2023-08", "2023-09", "1200000.00", "980000.00", "是", "干线低碳干线运输", "")),
+                    originalRowJson = repository.toJsonList(listOf("4", "EV-SEMI-05", "干线物流新能源重卡", "运输设备类", "重型半挂牵引车", "整车制造商", "辆", "1", "园区物流调度室C区", "2023-08", "2023-09", "1200000.00", "980000.00", "是", "干线运输资产", "")),
                     rowOrder = 4
                 )
             )

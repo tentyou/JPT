@@ -1,8 +1,14 @@
 package com.example.ui
 
 import android.content.Context
+import android.net.wifi.WifiManager
+import android.os.PowerManager
+import com.example.data.InventoryConstants
+import com.example.data.InventorySampling
+import com.example.data.InventoryTemplate
 import com.example.data.StockRepository
 import com.example.data.Project
+import com.example.data.SamplingMethod
 import java.io.BufferedReader
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -46,11 +52,14 @@ class WifiTransferServer(
     private val maxRequestBodyBytes = 20 * 1024 * 1024
 
     fun getPairingToken(): String = pairingToken
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
 
     fun start(port: Int = 8080) {
         if (isRunning) return
         pairingToken = UUID.randomUUID().toString().replace("-", "")
         isRunning = true
+        acquireTransferLocks()
         serverThread = Thread {
             try {
                 serverSocket = ServerSocket(port)
@@ -71,6 +80,10 @@ class WifiTransferServer(
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
+                if (isRunning) {
+                    isRunning = false
+                    releaseTransferLocks()
+                }
             }
         }.apply { start() }
     }
@@ -84,6 +97,53 @@ class WifiTransferServer(
         }
         serverSocket = null
         serverThread = null
+        releaseTransferLocks()
+    }
+
+    private fun acquireTransferLocks() {
+        try {
+            val powerManager = context.applicationContext.getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = powerManager.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "Tenken:WifiTransferServer"
+            ).apply {
+                setReferenceCounted(false)
+                if (!isHeld) acquire()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        try {
+            val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            wifiLock = wifiManager.createWifiLock(
+                WifiManager.WIFI_MODE_FULL_HIGH_PERF,
+                "Tenken:WifiTransferServer"
+            ).apply {
+                setReferenceCounted(false)
+                if (!isHeld) acquire()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun releaseTransferLocks() {
+        try {
+            wakeLock?.takeIf { it.isHeld }?.release()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        } finally {
+            wakeLock = null
+        }
+
+        try {
+            wifiLock?.takeIf { it.isHeld }?.release()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        } finally {
+            wifiLock = null
+        }
     }
 
     private fun handleClient(socket: Socket) {
@@ -97,7 +157,7 @@ class WifiTransferServer(
             val method = parts[0]
             val pathWithQuery = parts[1]
             
-            var filename = "upload.csv"
+            var filename = "upload.xlsx"
             var queryProjectId = ""
             var queryMode = "append" // append or replace
             var queryToken = ""
@@ -205,67 +265,12 @@ class WifiTransferServer(
                 val project = kotlinx.coroutines.runBlocking {
                     repository.getProjectById(queryProjectId)
                 }
-                val projectName = project?.name ?: "默认项目"
-                
-                val standardHeaderSequence = listOf(
-                    "序号", "设备编号", "设备名称", "规格型号", "生产厂家", "计量单位", "数量",
-                    "购置日期", "启用日期", "账面原值", "账面净值", "是否盘点", "备注", "资产分类"
-                )
-                
-                val extraHeaders = mutableListOf<String>()
-                if (project != null && project.columnHeadersJson.isNotEmpty()) {
-                    try {
-                        val existingHeaders = repository.fromJsonList(project.columnHeadersJson)
-                        for (h in existingHeaders) {
-                            val hTrim = h.trim()
-                            if (hTrim.isEmpty()) continue
-                            if (hTrim.equals("uuid", ignoreCase = true) || hTrim.equals("uid", ignoreCase = true)) continue
-                            
-                            val isStandard = standardHeaderSequence.any { standard ->
-                                standard == hTrim || hTrim.contains(standard) || standard.contains(hTrim)
-                            }
-                            if (!isStandard) {
-                                extraHeaders.add(hTrim)
-                            }
-                        }
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-                }
-                val templateHeaders = standardHeaderSequence + extraHeaders
-                
-                // Build POI Excel workbook
-                val wb = org.apache.poi.xssf.usermodel.XSSFWorkbook()
-                val sheet = wb.createSheet("盘点模板")
-                sheet.setDisplayGridlines(true)
-                
-                val headerRow = sheet.createRow(0)
-                val headerFont = wb.createFont().apply {
-                    bold = true
-                }
-                val headerStyle = wb.createCellStyle().apply {
-                    setFont(headerFont)
-                    alignment = org.apache.poi.ss.usermodel.HorizontalAlignment.CENTER
-                    verticalAlignment = org.apache.poi.ss.usermodel.VerticalAlignment.CENTER
-                }
-                
-                for (i in templateHeaders.indices) {
-                    val cell = headerRow.createCell(i)
-                    cell.setCellValue(templateHeaders[i])
-                    cell.cellStyle = headerStyle
-                    sheet.setColumnWidth(i, 15 * 256)
-                }
-                
-                // Create only the header row, no sample data rows are added to avoid clutter.
-                
-                val bos = ByteArrayOutputStream()
-                wb.write(bos)
-                wb.close()
-                val xlsxBytes = bos.toByteArray()
+                val projectName = project?.name ?: InventoryConstants.DEFAULT_PROJECT_NAME
+                val xlsxBytes = InventoryTemplate.createXlsxBytes(project?.columnHeadersJson)
                 
                 val safeFilename = URLEncoder.encode("${projectName}-盘点模板.xlsx", "UTF-8").replace("+", "%20")
                 val responseHeaders = "HTTP/1.1 200 OK\r\n" +
-                        "Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\r\n" +
+                        "Content-Type: ${InventoryTemplate.XLSX_MIME_TYPE}\r\n" +
                         "Content-Disposition: attachment; filename*=UTF-8''$safeFilename\r\n" +
                         "Content-Length: ${xlsxBytes.size}\r\n" +
                         "Connection: close\r\n\r\n"
@@ -307,7 +312,7 @@ class WifiTransferServer(
 
                 val defaultProject = kotlinx.coroutines.runBlocking {
                     val list = repository.listProjectsSync()
-                    if (list.isNotEmpty()) list[0].id else "default_project"
+                    if (list.isNotEmpty()) list[0].id else InventoryConstants.DEFAULT_PROJECT_ID
                 }
                 val targetProjId = queryProjectId.ifEmpty { defaultProject }
                 val isReplace = queryMode == "replace"
@@ -407,7 +412,8 @@ class WifiTransferServer(
                             repository.insertProject(proj.copy(
                                 baseDate = pBaseDate,
                                 companyName = pCompanyName,
-                                reportType = pReportType
+                                reportType = pReportType,
+                                metadataLocallyEdited = true
                             ))
                             onProjectChanged(proj.id)
                             success = true
@@ -462,7 +468,7 @@ class WifiTransferServer(
                 val json = org.json.JSONObject(bodyStr)
                 val pBaseDate = json.optString("baseDate", "")
                 val pCompanyName = json.optString("companyName", "")
-                val pReportType = json.optString("reportType", "评估报告")
+                val pReportType = json.optString("reportType", InventoryConstants.REPORT_TYPE_EVALUATION)
                 var pName = json.optString("name", "")
 
                 if (pName.trim().isEmpty()) {
@@ -567,7 +573,8 @@ class WifiTransferServer(
                                 name = if (updatedName.isNotEmpty()) updatedName else proj.name,
                                 baseDate = pBaseDate,
                                 companyName = pCompanyName.trim(),
-                                reportType = pReportType
+                                reportType = pReportType,
+                                metadataLocallyEdited = true
                             ))
                             onProjectChanged(proj.id)
                             success = true
@@ -584,13 +591,125 @@ class WifiTransferServer(
                 out.write(responseHeaders.toByteArray(Charsets.UTF_8))
                 out.write(jsonBytes)
                 out.flush()
+            } else if (method == "GET" && path == "/api/items") {
+                val responseJson = buildItemsResponseJson(queryProjectId)
+                val rBytes = responseJson.toByteArray(Charsets.UTF_8)
+                val rHeaders = "HTTP/1.1 200 OK\r\n" +
+                        "Content-Type: application/json; charset=utf-8\r\n" +
+                        "Content-Length: ${rBytes.size}\r\n" +
+                        "Connection: close\r\n\r\n"
+                out.write(rHeaders.toByteArray(Charsets.UTF_8))
+                out.write(rBytes)
+                out.flush()
+            } else if (method == "POST" && path == "/api/items/check" && contentLength > 0) {
+                val bodyStr = readBodyAsString(input, contentLength)
+                val json = org.json.JSONObject(bodyStr)
+                val uid = json.optString("uid", "")
+                val shouldCheck = json.optBoolean("shouldCheck", false)
+
+                var success = false
+                var projectId = ""
+                if (uid.isNotEmpty()) {
+                    kotlinx.coroutines.runBlocking {
+                        val item = repository.getItemByUid(uid)
+                        if (item != null) {
+                            success = repository.updateLocalSelection(listOf(item.copy(shouldCheck = shouldCheck))) == 1
+                            projectId = item.projectId
+                        }
+                    }
+                }
+                if (projectId.isNotEmpty()) {
+                    onProjectChanged(projectId)
+                }
+
+                val responseJson = "{\"success\": $success}"
+                val rBytes = responseJson.toByteArray(Charsets.UTF_8)
+                val rHeaders = "HTTP/1.1 200 OK\r\n" +
+                        "Content-Type: application/json; charset=utf-8\r\n" +
+                        "Content-Length: ${rBytes.size}\r\n" +
+                        "Connection: close\r\n\r\n"
+                out.write(rHeaders.toByteArray(Charsets.UTF_8))
+                out.write(rBytes)
+                out.flush()
+            } else if (method == "POST" && path == "/api/items/select-all" && contentLength > 0) {
+                val bodyStr = readBodyAsString(input, contentLength)
+                val json = org.json.JSONObject(bodyStr)
+                val pId = json.optString("projectId", queryProjectId)
+                val shouldCheck = json.optBoolean("shouldCheck", false)
+
+                var count = 0
+                var success = false
+                if (pId.isNotEmpty()) {
+                    kotlinx.coroutines.runBlocking {
+                        val items = repository.getItemsByProjectSync(pId)
+                        count = repository.updateLocalSelection(items.map { it.copy(shouldCheck = shouldCheck) })
+                        success = count > 0
+                    }
+                    onProjectChanged(pId)
+                }
+
+                val responseJson = "{\"success\": $success, \"count\": $count}"
+                val rBytes = responseJson.toByteArray(Charsets.UTF_8)
+                val rHeaders = "HTTP/1.1 200 OK\r\n" +
+                        "Content-Type: application/json; charset=utf-8\r\n" +
+                        "Content-Length: ${rBytes.size}\r\n" +
+                        "Connection: close\r\n\r\n"
+                out.write(rHeaders.toByteArray(Charsets.UTF_8))
+                out.write(rBytes)
+                out.flush()
+            } else if (method == "POST" && path == "/api/items/sample" && contentLength > 0) {
+                val bodyStr = readBodyAsString(input, contentLength)
+                val json = org.json.JSONObject(bodyStr)
+                val pId = json.optString("projectId", queryProjectId)
+                val category = json.optString("category", "")
+                val methodId = json.optString("method", SamplingMethod.ORIGINAL_VALUE_TOP_N.id)
+                val requestedCount = json.optInt("count", 0)
+                val targetRatio = json.optDouble("ratio", 0.0)
+
+                var responseJson = "{\"success\": false, \"error\": \"参数不完整\"}"
+                if (pId.isNotEmpty() && category.isNotEmpty()) {
+                    kotlinx.coroutines.runBlocking {
+                        val project = repository.getProjectById(pId)
+                        val items = repository.getItemsByProjectSync(pId)
+                        val samplingMethod = SamplingMethod.fromId(methodId)
+                        if (!repository.isRemoteProject(pId) && items.any { it.category.trim() == category.trim() }) {
+                            val result = InventorySampling.sample(
+                                allItems = items,
+                                columnHeadersJson = project?.columnHeadersJson,
+                                category = category,
+                                method = samplingMethod,
+                                requestedCount = requestedCount,
+                                targetRatioPercent = targetRatio
+                            )
+                            repository.updateLocalSelection(InventorySampling.applyResultToSelectedCategory(items, result))
+                            val obj = org.json.JSONObject()
+                            obj.put("success", true)
+                            obj.put("summary", result.summaryText())
+                            obj.put("selectedCount", result.selectedCount)
+                            obj.put("categoryCount", result.categoryCount)
+                            responseJson = obj.toString()
+                        } else {
+                            responseJson = "{\"success\": false, \"error\": \"未找到所选资产分类\"}"
+                        }
+                    }
+                    onProjectChanged(pId)
+                }
+
+                val rBytes = responseJson.toByteArray(Charsets.UTF_8)
+                val rHeaders = "HTTP/1.1 200 OK\r\n" +
+                        "Content-Type: application/json; charset=utf-8\r\n" +
+                        "Content-Length: ${rBytes.size}\r\n" +
+                        "Connection: close\r\n\r\n"
+                out.write(rHeaders.toByteArray(Charsets.UTF_8))
+                out.write(rBytes)
+                out.flush()
             } else if (method == "GET" && path == "/api/prepare-zip") {
                 val project = kotlinx.coroutines.runBlocking {
                     repository.getProjectById(queryProjectId)
                 }
                 val responseJson = if (project != null) {
                     if (project.baseDate.trim().isEmpty() || project.companyName.trim().isEmpty()) {
-                        "{\"success\": false, \"error\": \"生成 ZIP 失败：评估基准日和持有单位不能为空，需强制用户填写，请先在网页下方或手机App端“设置信息”中保存后重试！\"}"
+                        "{\"success\": false, \"error\": \"生成项目资料包失败：请先填写评估基准日和产权持有单位。\"}"
                     } else {
                         val items = kotlinx.coroutines.runBlocking {
                             repository.getItemsByProjectSync(queryProjectId)
@@ -603,7 +722,7 @@ class WifiTransferServer(
                             val timestampStr = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.getDefault()).format(java.util.Date())
                             "{\"success\": true, \"size\": ${destFile.length()}, \"filename\": \"${URLEncoder.encode("${project.name}-盘点表-${timestampStr}.zip", "UTF-8").replace("+", "%20")}\"}"
                         } else {
-                            "{\"success\": false, \"error\": \"生成 ZIP 失败：设备为空或照片及PDF尚未就绪\"}"
+                            "{\"success\": false, \"error\": \"生成项目资料包失败：项目暂无可导出的资产记录或 PDF 文件。\"}"
                         }
                     }
                 } else {
@@ -752,6 +871,84 @@ class WifiTransferServer(
         }
     }
 
+    private fun readBodyAsString(input: java.io.InputStream, contentLength: Int): String {
+        val bodyBos = ByteArrayOutputStream()
+        val buffer = ByteArray(4096)
+        var totalRead = 0
+        while (totalRead < contentLength) {
+            val toRead = Math.min(4096, contentLength - totalRead)
+            val read = input.read(buffer, 0, toRead)
+            if (read == -1) break
+            bodyBos.write(buffer, 0, read)
+            totalRead += read
+        }
+        return String(bodyBos.toByteArray(), Charsets.UTF_8)
+    }
+
+    private fun buildItemsResponseJson(projectId: String): String {
+        val project = kotlinx.coroutines.runBlocking {
+            repository.getProjectById(projectId)
+        }
+        val items = kotlinx.coroutines.runBlocking {
+            repository.getItemsByProjectSync(projectId)
+        }
+
+        val root = org.json.JSONObject()
+        root.put("success", true)
+        root.put("projectId", projectId)
+        root.put("selectionManagedRemotely", kotlinx.coroutines.runBlocking { repository.isRemoteProject(projectId) })
+        root.put("totalCount", items.size)
+        root.put("checkedCount", items.count { it.shouldCheck })
+
+        val headersArr = org.json.JSONArray()
+        InventorySampling.parseJsonStringList(project?.columnHeadersJson).forEach { headersArr.put(it) }
+        root.put("headers", headersArr)
+
+        val categoriesArr = org.json.JSONArray()
+        InventorySampling.categories(items).forEach { categoriesArr.put(it) }
+        root.put("categories", categoriesArr)
+
+        val methodsArr = org.json.JSONArray()
+        InventorySampling.methods.forEach { method ->
+            val methodObj = org.json.JSONObject()
+            methodObj.put("id", method.id)
+            methodObj.put("name", method.displayName)
+            methodObj.put("requiresCount", method.requiresCount)
+            methodObj.put("requiresRatio", method.requiresRatio)
+            methodsArr.put(methodObj)
+        }
+        root.put("methods", methodsArr)
+
+        val itemsArr = org.json.JSONArray()
+        items.forEach { item ->
+            val obj = org.json.JSONObject()
+            obj.put("uid", item.uid)
+            obj.put("name", item.name)
+            obj.put("category", item.category)
+            obj.put("location", item.location)
+            obj.put("originalCode", item.originalCode)
+            obj.put("shouldCheck", item.shouldCheck)
+            obj.put("photoCount", item.photoCount)
+            obj.put("rowOrder", item.rowOrder)
+            obj.put("originalValue", InventorySampling.originalValue(item, project?.columnHeadersJson))
+            obj.put("netValue", InventorySampling.netValue(item, project?.columnHeadersJson))
+            obj.put("quantity", InventorySampling.quantity(item, project?.columnHeadersJson))
+
+            val metadataArr = org.json.JSONArray()
+            InventorySampling.metadataPairs(item, project?.columnHeadersJson).forEach { (label, value) ->
+                val pairObj = org.json.JSONObject()
+                pairObj.put("label", label)
+                pairObj.put("value", value)
+                metadataArr.put(pairObj)
+            }
+            obj.put("metadata", metadataArr)
+            itemsArr.put(obj)
+        }
+        root.put("items", itemsArr)
+
+        return root.toString()
+    }
+
     private fun escapeHtml(s: String): String {
         return s.replace("&", "&amp;")
             .replace("<", "&lt;")
@@ -891,7 +1088,7 @@ class WifiTransferServer(
                   padding: 30px;
                   box-sizing: border-box;
                   overflow-y: auto;
-                  max-width: 850px;
+                  max-width: 1180px;
                 }
                 .section-title {
                   font-size: 15px;
@@ -1111,7 +1308,55 @@ class WifiTransferServer(
                   color: #94a3b8;
                   line-height: 1.5;
                 }
-                @media (max-width: 768px) {
+                .ledger-toolbar {
+                  display: grid;
+                  grid-template-columns: repeat(4, minmax(150px, 1fr));
+                  gap: 12px;
+                  align-items: end;
+                }
+                .ledger-actions {
+                  display: flex;
+                  gap: 8px;
+                  flex-wrap: wrap;
+                  align-items: center;
+                }
+                .table-wrap {
+                  overflow-x: auto;
+                  border: 1px solid #1f2937;
+                  border-radius: 8px;
+                }
+                table.ledger-table {
+                  width: 100%;
+                  min-width: 980px;
+                  border-collapse: collapse;
+                  font-size: 12px;
+                }
+                .ledger-table th, .ledger-table td {
+                  border-bottom: 1px solid #1f2937;
+                  padding: 8px 10px;
+                  text-align: left;
+                  vertical-align: top;
+                }
+                .ledger-table th {
+                  color: #94a3b8;
+                  background-color: #0f172a;
+                  font-weight: 700;
+                }
+                .ledger-table tr:hover td {
+                  background-color: rgba(56, 189, 248, 0.05);
+                }
+                .ledger-name {
+                  font-weight: 700;
+                  color: #f8fafc;
+                  max-width: 220px;
+                }
+                .ledger-muted {
+                  color: #94a3b8;
+                }
+                .ledger-summary {
+                  white-space: pre-line;
+                }
+                @media (max-width: 980px) {
                   .container {
                     flex-direction: column;
                   }
@@ -1119,6 +1364,9 @@ class WifiTransferServer(
                     width: 100%;
                     border-right: none;
                     border-bottom: 1px solid #1f2937;
+                  }
+                  .ledger-toolbar {
+                    grid-template-columns: 1fr;
                   }
                 }
               </style>
@@ -1251,20 +1499,80 @@ class WifiTransferServer(
                     <div class="form-group">
                       <label>载入资产台账列表</label>
                       <div class="upload-zone" id="dropzone" onclick="document.getElementById('fileInput').click()">
-                        <div class="icon">📁</div>
+                        <div class="icon">文件</div>
                         <div class="title">点击或拖拽表格文件到这里</div>
-                        <div class="subtitle">支持 Excel (.xlsx) 及 CSV (.csv) 格式</div>
+                        <div class="subtitle">默认使用 Excel (.xlsx)，CSV (.csv) 仅作兼容导入</div>
                         <input type="file" id="fileInput" accept=".xlsx,.csv" style="display:none" onchange="performUpload(this.files[0])">
                       </div>
                     </div>
 
                     <div class="template-box">
                       <b>表格标准列须知：</b><br>
-                      选择的文件必须含有：“编号”(Code)、“资产分类”(Category)、“物品名称”(Name)、“存放位置”(Location)，以及“是否盘点”(ShouldCheck) 列。<br>
-                      “是否盘点”设为“否”或“0”的设备默认移入台账预览，设为“是”或“1”的立即激活呈现在盘点列表中。
+                      Excel 台账必须包含“设备名称”(Name/AssetName) 和“资产分类”(Category) 列，且每一条资产记录这两项均不得为空。<br>
+                      建议同时提供“设备编号”(Code)、“存放位置”(Location)、“账面原值”和“是否盘点”(ShouldCheck) 等列；“是否盘点”设为“否”或“0”的资产进入台账预览，设为“是”或“1”的资产进入待盘点清单。
                     </div>
 
                     <div id="importStatus" class="status-box"></div>
+                  </div>
+
+                  <div style="background-color: #111827; border-radius: 12px; padding: 24px; display: flex; flex-direction: column; gap: 16px; border: 1px solid #1f2937; margin-top: 24px;">
+                    <div style="display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center;">
+                      <div>
+                        <div style="font-weight: bold; font-size: 15px; color: #38bdf8;">台账预览与分类抽样</div>
+                        <div id="ledgerCountText" class="ledger-muted" style="font-size: 12px; margin-top: 4px;">正在读取当前项目台账。</div>
+                      </div>
+                      <div class="ledger-actions">
+                        <button type="button" class="btn" onclick="loadLedger()">刷新台账</button>
+                        <button type="button" class="btn btn-green" onclick="setAllChecks(true)">全选</button>
+                        <button type="button" class="btn btn-amber" onclick="setAllChecks(false)">取消全选</button>
+                      </div>
+                    </div>
+
+                    <div class="ledger-toolbar">
+                      <div class="form-group">
+                        <label>设备分类</label>
+                        <select id="samplingCategory"></select>
+                      </div>
+                      <div class="form-group">
+                        <label>抽样方式</label>
+                        <select id="samplingMethod" onchange="onSamplingMethodChanged()"></select>
+                      </div>
+                      <div class="form-group" id="samplingCountBox">
+                        <label>抽样数量</label>
+                        <input type="text" id="samplingCount" value="10" placeholder="10 / 50 / 100 / 自定义">
+                      </div>
+                      <div class="form-group" id="samplingRatioBox" style="display: none;">
+                        <label>目标占比（%）</label>
+                        <input type="text" id="samplingRatio" value="70" placeholder="如：70">
+                      </div>
+                    </div>
+
+                    <div class="ledger-actions">
+                      <button type="button" class="btn btn-green" onclick="applySampling()">应用分类抽样</button>
+                      <span class="ledger-muted" style="font-size: 12px;">抽样只替换所选分类内的待盘点状态，其他分类保持不变。</span>
+                    </div>
+
+                    <div id="samplingStatus" class="status-box ledger-summary"></div>
+                    <div class="table-wrap">
+                      <table class="ledger-table">
+                        <thead>
+                          <tr>
+                            <th style="width: 70px;">盘点</th>
+                            <th>设备编号</th>
+                            <th>设备名称</th>
+                            <th>资产分类</th>
+                            <th>存放位置</th>
+                            <th>账面原值</th>
+                            <th>账面净值</th>
+                            <th>数量</th>
+                            <th>照片</th>
+                          </tr>
+                        </thead>
+                        <tbody id="ledgerBody">
+                          <tr><td colspan="9" class="ledger-muted">暂无台账数据。</td></tr>
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1280,6 +1588,7 @@ class WifiTransferServer(
                                     return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(authToken);
                                   }
                                   let knownProjects = $knownProjectsJson;
+                let ledgerData = { items: [], categories: [], methods: [] };
 
                 function pollProjects() {
                   apiFetch('/api/projects')
@@ -1336,6 +1645,7 @@ class WifiTransferServer(
                 function onSelectDropdownChanged() {
                   updateTemplateLink();
                   loadProjectMeta();
+                  loadLedger();
                 }
 
                 function selectProject(id) {
@@ -1350,13 +1660,14 @@ class WifiTransferServer(
                     activeEl.classList.add('active');
                   }
                   loadProjectMeta();
+                  loadLedger();
                 }
 
                 function createProject() {
                   const company = document.getElementById('newProjCompany').value.trim();
                   const baseDate = document.getElementById('newProjBaseDate').value;
                   if (!company || !baseDate) {
-                    alert("请填写持有单位名称与评估基准日！");
+                    alert("请填写产权持有单位名称与评估基准日。");
                     return;
                   }
 
@@ -1384,7 +1695,7 @@ class WifiTransferServer(
                   .then(r => r.json())
                   .then(data => {
                     if (data.success) {
-                      alert("项目 [" + data.name + "] 创建并同步成功！");
+                      alert("项目 [" + data.name + "] 已创建并同步。");
                       window.location.reload();
                     } else {
                       alert("新建失败");
@@ -1397,7 +1708,7 @@ class WifiTransferServer(
 
                 function deleteProject(event, id) {
                   event.stopPropagation();
-                  if (!confirm("您确定要彻底删除该项目、及其全部清单和照片资料吗？此操作无法撤销。")) {
+                  if (!confirm("确认删除该项目及其全部台账、照片和 PDF 文件？此操作不可撤销。")) {
                     return;
                   }
 
@@ -1409,7 +1720,7 @@ class WifiTransferServer(
                   .then(r => r.json())
                   .then(data => {
                     if (data.success) {
-                      alert("项目已成功删除。");
+                      alert("项目已删除。");
                       window.location.reload();
                     } else {
                       alert("删除失败");
@@ -1475,7 +1786,7 @@ class WifiTransferServer(
                   const metaStatus = document.getElementById('metaStatus');
                   metaStatus.style.display = 'block';
                   metaStatus.style.color = '#38bdf8';
-                  metaStatus.innerText = "正在保存参数设定到手机...";
+                  metaStatus.innerText = "正在保存项目参数...";
 
                   const dateDigits = baseDateVal.replace(/-/g, '');
                   const updatedName = companyName + "-" + dateDigits;
@@ -1495,13 +1806,13 @@ class WifiTransferServer(
                   .then(data => {
                     if (data.success) {
                       metaStatus.style.color = '#34d399';
-                      metaStatus.innerText = "设置已同步，项目更名为：" + updatedName;
+                      metaStatus.innerText = "项目参数已保存，项目名称更新为：" + updatedName;
                       const actItem = document.getElementById('item_' + sel.value);
                       if (actItem) {
                         const nameEl = actItem.querySelector('.proj-name');
                         if (nameEl) nameEl.innerText = updatedName;
                         const metaEl = actItem.querySelector('.proj-meta');
-                        if (metaEl) metaEl.innerText = "📅 " + baseDate + " | 🏢 " + companyName;
+                        if (metaEl) metaEl.innerText = "评估基准日：" + baseDate + " | 产权持有单位：" + companyName;
                       }
                       setTimeout(() => { metaStatus.style.display = 'none'; }, 3500);
                     } else {
@@ -1512,6 +1823,191 @@ class WifiTransferServer(
                   .catch(e => {
                     metaStatus.style.color = '#fca5a5';
                     metaStatus.innerText = "网络传输出错，请重试。";
+                  });
+                }
+
+                function escapeHtmlText(value) {
+                  return String(value || "")
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;")
+                    .replace(/"/g, "&quot;")
+                    .replace(/'/g, "&#39;");
+                }
+
+                function formatNumber(value) {
+                  const n = Number(value || 0);
+                  if (!Number.isFinite(n) || n === 0) return "";
+                  return n.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
+                }
+
+                function loadLedger() {
+                  const sel = document.getElementById('projectSelect');
+                  if (!sel || !sel.value) return;
+                  apiFetch('/api/items?projectId=' + encodeURIComponent(sel.value))
+                    .then(r => r.json())
+                    .then(data => {
+                      ledgerData = data || { items: [], categories: [], methods: [] };
+                      renderLedgerControls();
+                      renderLedgerTable();
+                    })
+                    .catch(e => {
+                      const countText = document.getElementById('ledgerCountText');
+                      if (countText) countText.innerText = "台账读取失败，请确认局域网连接状态。";
+                    });
+                }
+
+                function renderLedgerControls() {
+                  const countText = document.getElementById('ledgerCountText');
+                  if (countText) {
+                    countText.innerText = "台账共 " + (ledgerData.totalCount || 0) + " 项，待盘点 " + (ledgerData.checkedCount || 0) + " 项。";
+                  }
+
+                  const categorySelect = document.getElementById('samplingCategory');
+                  const previousCategory = categorySelect ? categorySelect.value : "";
+                  if (categorySelect) {
+                    categorySelect.innerHTML = "";
+                    (ledgerData.categories || []).forEach(cat => {
+                      const opt = document.createElement('option');
+                      opt.value = cat;
+                      opt.textContent = cat;
+                      categorySelect.appendChild(opt);
+                    });
+                    if (previousCategory && (ledgerData.categories || []).indexOf(previousCategory) >= 0) {
+                      categorySelect.value = previousCategory;
+                    }
+                  }
+
+                  const methodSelect = document.getElementById('samplingMethod');
+                  const previousMethod = methodSelect ? methodSelect.value : "";
+                  if (methodSelect) {
+                    methodSelect.innerHTML = "";
+                    (ledgerData.methods || []).forEach(method => {
+                      const opt = document.createElement('option');
+                      opt.value = method.id;
+                      opt.textContent = method.name;
+                      opt.dataset.requiresCount = method.requiresCount ? "true" : "false";
+                      opt.dataset.requiresRatio = method.requiresRatio ? "true" : "false";
+                      methodSelect.appendChild(opt);
+                    });
+                    if (previousMethod && (ledgerData.methods || []).some(m => m.id === previousMethod)) {
+                      methodSelect.value = previousMethod;
+                    }
+                  }
+                  onSamplingMethodChanged();
+                }
+
+                function renderLedgerTable() {
+                  const body = document.getElementById('ledgerBody');
+                  if (!body) return;
+                  const items = ledgerData.items || [];
+                  if (items.length === 0) {
+                    body.innerHTML = "<tr><td colspan='9' class='ledger-muted'>暂无台账数据。请先导入 Excel 台账。</td></tr>";
+                    return;
+                  }
+                  body.innerHTML = items.map(item => {
+                    const checked = (item.shouldCheck ? "checked" : "") + (ledgerData.selectionManagedRemotely ? " disabled" : "");
+                    return "<tr>" +
+                      "<td><input type='checkbox' " + checked + " onchange=\"setItemCheck('" + escapeHtmlText(item.uid) + "', this.checked)\"></td>" +
+                      "<td>" + escapeHtmlText(item.originalCode) + "</td>" +
+                      "<td class='ledger-name'>" + escapeHtmlText(item.name) + "</td>" +
+                      "<td>" + escapeHtmlText(item.category) + "</td>" +
+                      "<td>" + escapeHtmlText(item.location) + "</td>" +
+                      "<td>" + escapeHtmlText(formatNumber(item.originalValue)) + "</td>" +
+                      "<td>" + escapeHtmlText(formatNumber(item.netValue)) + "</td>" +
+                      "<td>" + escapeHtmlText(formatNumber(item.quantity)) + "</td>" +
+                      "<td>" + Number(item.photoCount || 0) + "</td>" +
+                      "</tr>";
+                  }).join("");
+                }
+
+                function onSamplingMethodChanged() {
+                  const methodSelect = document.getElementById('samplingMethod');
+                  const opt = methodSelect && methodSelect.options[methodSelect.selectedIndex];
+                  const requiresCount = opt ? opt.dataset.requiresCount === "true" : true;
+                  const requiresRatio = opt ? opt.dataset.requiresRatio === "true" : false;
+                  document.getElementById('samplingCountBox').style.display = requiresCount ? 'flex' : 'none';
+                  document.getElementById('samplingRatioBox').style.display = requiresRatio ? 'flex' : 'none';
+                }
+
+                function setItemCheck(uid, shouldCheck) {
+                  apiFetch('/api/items/check', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ uid: uid, shouldCheck: shouldCheck })
+                  })
+                  .then(r => r.json())
+                  .then(data => {
+                    if (!data.success) alert("更新盘点状态失败。");
+                    loadLedger();
+                  })
+                  .catch(e => alert("网络传输失败，盘点状态未更新。"));
+                }
+
+                function setAllChecks(shouldCheck) {
+                  if (ledgerData.selectionManagedRemotely) { alert("线上项目的应盘范围由 MCP 同步管理，请在线上调整后重新同步。"); return; }
+                  const sel = document.getElementById('projectSelect');
+                  if (!sel || !sel.value) return;
+                  apiFetch('/api/items/select-all', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ projectId: sel.value, shouldCheck: shouldCheck })
+                  })
+                  .then(r => r.json())
+                  .then(data => {
+                    if (!data.success) alert("批量更新失败。");
+                    loadLedger();
+                  })
+                  .catch(e => alert("网络传输失败，批量更新未完成。"));
+                }
+
+                function applySampling() {
+                  if (ledgerData.selectionManagedRemotely) { alert("线上项目的应盘范围由 MCP 同步管理，请在线上调整后重新同步。"); return; }
+                  const sel = document.getElementById('projectSelect');
+                  const category = document.getElementById('samplingCategory').value;
+                  const methodId = document.getElementById('samplingMethod').value;
+                  const count = parseInt(document.getElementById('samplingCount').value || "0", 10);
+                  const ratio = parseFloat(document.getElementById('samplingRatio').value || "0");
+                  const status = document.getElementById('samplingStatus');
+                  if (!sel || !sel.value || !category) {
+                    alert("请先选择项目和设备分类。");
+                    return;
+                  }
+                  status.className = 'status-box active';
+                  status.style.display = 'block';
+                  status.style.backgroundColor = '#1e3a5f';
+                  status.style.color = '#60a5fa';
+                  status.style.borderColor = '#2563eb';
+                  status.innerText = "正在执行分类抽样。";
+
+                  apiFetch('/api/items/sample', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      projectId: sel.value,
+                      category: category,
+                      method: methodId,
+                      count: Number.isFinite(count) ? count : 0,
+                      ratio: Number.isFinite(ratio) ? ratio : 0
+                    })
+                  })
+                  .then(r => r.json())
+                  .then(data => {
+                    if (data.success) {
+                      status.className = 'status-box active status-success ledger-summary';
+                      status.style.display = 'block';
+                      status.innerText = data.summary || "分类抽样已完成。";
+                      loadLedger();
+                    } else {
+                      status.className = 'status-box active status-error';
+                      status.style.display = 'block';
+                      status.innerText = "抽样失败: " + (data.error || "未知错误");
+                    }
+                  })
+                  .catch(e => {
+                    status.className = 'status-box active status-error';
+                    status.style.display = 'block';
+                    status.innerText = "网络传输失败，抽样未完成。";
                   });
                 }
 
@@ -1528,7 +2024,7 @@ class WifiTransferServer(
                   status.style.color = '#60a5fa';
                   status.style.borderColor = '#2563eb';
                   status.style.display = 'block';
-                  status.innerText = "正在生成 ZIP 压缩包，需要一些时间，请稍等...";
+                  status.innerText = "正在生成项目资料包，请稍候。";
 
                   apiFetch('/api/prepare-zip?projectId=' + encodeURIComponent(sel.value))
                     .then(r => r.json())
@@ -1547,7 +2043,7 @@ class WifiTransferServer(
                     .catch(e => {
                       status.className = 'status-box active status-error';
                       status.style.display = 'block';
-                      status.innerText = "建立局域网连接超时，生成失败。";
+                      status.innerText = "局域网连接超时，项目资料包生成失败。";
                     });
                 }
 
@@ -1592,7 +2088,7 @@ class WifiTransferServer(
                   status.style.color = '#60a5fa';
                   status.style.borderColor = '#2563eb';
                   status.style.display = 'block';
-                  status.innerText = "正在传输并解析 [" + file.name + "] 中，请稍候...";
+                  status.innerText = "正在上传并解析 [" + file.name + "]，请稍候。";
 
                   apiFetch('/upload?projectId=' + encodeURIComponent(sel.value) + '&mode=' + mode + '&filename=' + encodeURIComponent(file.name), {
                     method: 'POST',
@@ -1602,8 +2098,9 @@ class WifiTransferServer(
                   .then(data => {
                     if (data.success) {
                       status.className = 'status-box active status-success';
-                      const modeText = mode === 'replace' ? '替换并刷新' : '成功追加';
-                      status.innerText = "导入成功！已" + modeText + " " + data.count + " 条资产记录。手机App的盘点列表已同步更新。";
+                      const modeText = mode === 'replace' ? '替换' : '追加';
+                      status.innerText = "资产台账已导入，" + modeText + " " + data.count + " 条资产记录。手机端盘点列表已同步更新。";
+                      loadLedger();
                     } else {
                       status.className = 'status-box active status-error';
                       status.innerText = "导入失败: " + data.error;
@@ -1611,7 +2108,7 @@ class WifiTransferServer(
                   })
                   .catch(e => {
                     status.className = 'status-box active status-error';
-                    status.innerText = "网络传输失败，请确保设备与电脑连接在完全相同的局域网。";
+                    status.innerText = "网络传输失败，请确认手机与电脑处于同一局域网。";
                   });
                 }
 

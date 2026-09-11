@@ -131,7 +131,7 @@ class McpClient(
     companion object {
         private const val VERSION = "2025-06-18"
         private const val MAX_RESPONSE_BYTES = 16L * 1024 * 1024
-        private val READ_TOOLS = setOf("get_my_projects", "get_project_companies", "get_company_asset_based_approach_subjects", "get_asset_based_approach_draft_data")
+        private val READ_TOOLS = setOf("get_project_context", "get_my_projects", "get_project_companies", "get_company_asset_based_approach_subjects", "get_asset_based_approach_draft_data")
 
         /** Finish at the matching event; an SSE response need not close its connection. */
         internal fun readEvent(source: BufferedSource, id: String): JSONObject {

@@ -30,10 +30,11 @@ class AppDatabaseMigrationTest {
 
         val migrated = helper.runMigrationsAndValidate(
             "migration-test",
-            7,
+            8,
             true,
             AppDatabase.MIGRATION_5_6,
-            AppDatabase.MIGRATION_6_7
+            AppDatabase.MIGRATION_6_7,
+            AppDatabase.MIGRATION_7_8
         )
         migrated.query("SELECT COUNT(*) FROM projects").use { cursor ->
             assertTrue(cursor.moveToFirst())

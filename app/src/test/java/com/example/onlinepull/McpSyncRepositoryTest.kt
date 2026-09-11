@@ -37,7 +37,7 @@ class McpSyncRepositoryTest {
         db.stockItemDao().updatePhotoState(original.uid, 2, "已生成")
         val photo = File(context.filesDir, "photos/${original.uid}/one.jpg").apply { parentFile!!.mkdirs(); writeText("photo-evidence") }
         val pdf = File(context.filesDir, "pdfs/${original.uid}/照片.pdf").apply { parentFile!!.mkdirs(); writeText("pdf-evidence") }
-        db.projectDao().insertProject(db.projectDao().getProjectById(first.localProjectId)!!.copy(baseDate = "2026-09-11", watermarkEnabled = true))
+        db.projectDao().insertProject(db.projectDao().getProjectById(first.localProjectId)!!.copy(baseDate = "2026-09-11", watermarkEnabled = true, metadataLocallyEdited = true))
         source.rows = listOf(row("a", "更新名称"))
         val second = repository.sync(project)
         val updated = db.stockItemDao().getItemsByProjectSync(first.localProjectId).single()
@@ -100,6 +100,36 @@ class McpSyncRepositoryTest {
         assertEquals("conflict", db.remoteSyncDao().bindingsForProject(first.localProjectId).single().syncState)
     }
 
+    @Test fun remoteMetadataUpdatesUntilUserSavesLocalOverride() = runBlocking(Dispatchers.IO) {
+        source.metadata = RemoteProjectMetadata("2025-07-30", "公司甲、公司乙", "咨询报告")
+        val first = repository.sync(project)
+        val dao = db.projectDao()
+        val initial = dao.getProjectById(first.localProjectId)!!
+        assertEquals("2025-07-30", initial.baseDate)
+        assertEquals("公司甲、公司乙", initial.companyName)
+        assertEquals("咨询报告", initial.reportType)
+        source.metadata = source.metadata.copy(baseDate = "2026-09-30")
+        repository.sync(project)
+        assertEquals("2026-09-30", dao.getProjectById(initial.id)!!.baseDate)
+        dao.insertProject(initial.copy(baseDate = "2026-01-01", companyName = "本地单位", metadataLocallyEdited = true))
+        repository.sync(project)
+        assertEquals("2026-01-01", dao.getProjectById(initial.id)!!.baseDate)
+        assertEquals("本地单位", dao.getProjectById(initial.id)!!.companyName)
+        assertEquals("2026-09-30", source.metadata.baseDate)
+    }
+
+    @Test fun localSamplingCannotChangeRemoteFlagsOrOverwritePhotos() = runBlocking(Dispatchers.IO) {
+        val report = repository.sync(project)
+        val remote = db.stockItemDao().getItemsByProjectSync(report.localProjectId).single()
+        val local = com.example.data.StockItem(uid = "local", name = "本地", projectId = report.localProjectId)
+        db.stockItemDao().insertItem(local)
+        db.stockItemDao().updatePhotoState(local.uid, 4, "已生成")
+        val stock = com.example.data.StockRepository(db.stockItemDao(), db.projectDao(), db.remoteSyncDao())
+        assertEquals(1, stock.updateLocalSelection(listOf(remote.copy(shouldCheck = false), local.copy(shouldCheck = false))))
+        assertTrue(db.stockItemDao().getItemByUid(remote.uid)!!.shouldCheck)
+        assertFalse(db.stockItemDao().getItemByUid(local.uid)!!.shouldCheck)
+        assertEquals(4, db.stockItemDao().getItemByUid(local.uid)!!.photoCount)
+    }
     @Test fun migrationUsesTheSameStableKeyAsWebLoginVersion() {
         val expected = java.security.MessageDigest.getInstance("SHA-256")
             .digest("row:101725686071298:a".toByteArray()).joinToString("") { "%02x".format(it) }.take(40)
@@ -107,6 +137,8 @@ class McpSyncRepositoryTest {
     }
 
     private class FixtureSource : InventorySource {
+        var metadata = RemoteProjectMetadata()
+        override suspend fun projectMetadata(project: RemoteProjectSummary, companies: List<RemoteCompanySummary>) = metadata
         var rows = listOf(row("a"))
         var failSecondSubject = false
         override suspend fun listProjects() = listOf(RemoteProjectSummary("101725686071298", "测试项目"))

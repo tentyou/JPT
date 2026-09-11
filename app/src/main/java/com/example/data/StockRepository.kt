@@ -88,7 +88,7 @@ class StockRepository(
         try {
             val project = kotlinx.coroutines.runBlocking {
                 projectDao.getProjectById(projectId)
-            } ?: Project(id = projectId, name = "默认项目")
+            } ?: Project(id = projectId, name = InventoryConstants.DEFAULT_PROJECT_NAME)
 
             val wb = XSSFWorkbook()
 
@@ -240,7 +240,7 @@ class StockRepository(
                 r1.heightInPoints = 20f
                 val c1 = r1.createCell(0)
                 val baseDateText = if (project.baseDate.isNotEmpty()) project.baseDate else "2026年05月29日"
-                c1.setCellValue("评估基准日：$baseDateText")
+                c1.setCellValue("${project.baseDateLabel}：$baseDateText")
                 c1.cellStyle = styleBaseDate
                 if (lastVisibleColIdx > 0) {
                     sheet.addMergedRegion(CellRangeAddress(1, 1, 0, lastVisibleColIdx))
@@ -251,7 +251,7 @@ class StockRepository(
                 val r3 = sheet.createRow(3)
                 r3.heightInPoints = 20f
                 val c3Left = r3.createCell(0)
-                val unitLabel = if (project.reportType == "评估报告") "被评估单位" else "产权持有单位"
+                val unitLabel = if (project.reportType == InventoryConstants.REPORT_TYPE_EVALUATION) "被评估单位" else "产权持有单位"
                 val companyNameText = if (project.companyName.isNotEmpty()) project.companyName else "未指定代评单位"
                 c3Left.setCellValue("$unitLabel：$companyNameText")
                 c3Left.cellStyle = styleLabelLeft
@@ -304,7 +304,7 @@ class StockRepository(
                         if (headerName == "序号") {
                             rawStr = (itemIdx + 1).toString()
                         } else if (headerName == "备注") {
-                            rawStr = if (shouldPutCheckmark) "✔" else ""
+                            rawStr = if (shouldPutCheckmark) "已盘点" else ""
                         } else {
                             val originalKey = baseHeaderCells.find { originalHeader ->
                                 val trimmed = originalHeader.trim()
@@ -363,7 +363,7 @@ class StockRepository(
                             break
                         }
                     }
-                    if (allEmpty && headerName != "序号" && headerName != "设备编号" && headerName != "设备名称") {
+                    if (allEmpty && headerName != "序号" && headerName != "设备编号" && headerName != "设备名称" && headerName != "备注") {
                         sheet.setColumnHidden(col, true)
                     }
                 }
@@ -446,6 +446,17 @@ class StockRepository(
         stockItemDao.insertItem(item)
     }
 
+    suspend fun isRemoteProject(projectId: String): Boolean = remoteSyncDao?.findProjectByLocalId(projectId) != null
+
+    /** Selection from local UI or Wi-Fi must never replace an MCP-owned inventory flag. */
+    suspend fun updateLocalSelection(items: List<StockItem>): Int = withContext(Dispatchers.IO) {
+        val bound = items.map { it.projectId }.distinct().flatMap {
+            remoteSyncDao?.bindingsForProject(it).orEmpty()
+        }.map { it.stockUid }.toSet()
+        val local = items.filter { it.uid !in bound }
+        local.forEach { stockItemDao.updateShouldCheck(it.uid, it.shouldCheck) }
+        local.size
+    }
     suspend fun insertAll(items: List<StockItem>) = withContext(Dispatchers.IO) {
         stockItemDao.insertAll(items)
     }
@@ -505,6 +516,7 @@ class StockRepository(
     suspend fun parseAndImportCsv(context: Context, inputStream: InputStream, projectId: String, replace: Boolean): Boolean = withContext(Dispatchers.IO) {
         try {
             val newList = mutableListOf<StockItem>()
+            var importedHeaders: List<String> = emptyList()
             inputStream.bufferedReader().use { reader ->
                 val lines = reader.readLines()
                 if (lines.isEmpty()) return@withContext false
@@ -512,13 +524,7 @@ class StockRepository(
                 // Try to detect headers or just parse
                 val headerLine = lines[0]
                 val columns = headerLine.split(",").map { it.trim().replace("\"", "") }
-
-                // Save header columns to Project
-                val project = projectDao.getProjectById(projectId)
-                if (project != null) {
-                    val headerJson = toJsonList(columns)
-                    projectDao.insertProject(project.copy(columnHeadersJson = headerJson))
-                }
+                importedHeaders = columns
 
                 // Map header index
                 var nameIdx = -1
@@ -544,16 +550,7 @@ class StockRepository(
                     }
                 }
 
-                // If naming match failed, do a default position fallback ONLY if they match positions,
-                // but we must ultimately guarantee nameIdx and categoryIdx exist.
-                if (nameIdx == -1) {
-                    nameIdx = if (columns.size > 1) 1 else 0
-                }
-                if (categoryIdx == -1) {
-                    categoryIdx = if (columns.size > 2) 2 else -1
-                }
-                
-                // Enforce that CSV must contain name and category
+                // Enforce that CSV headers must explicitly contain device name and asset category.
                 if (nameIdx == -1 || categoryIdx == -1 || nameIdx >= columns.size || categoryIdx >= columns.size) {
                     return@withContext false
                 }
@@ -582,16 +579,15 @@ class StockRepository(
                     val cells = parseCsvLine(line)
                     if (cells.isEmpty()) continue
 
-                    val itemCode = if (codeIdx >= 0 && codeIdx < cells.size) cells[codeIdx] else "C_${1000 + i}"
-                    val itemName = if (nameIdx >= 0 && nameIdx < cells.size) cells[nameIdx] else "未命名盘点物 $i"
-                    val itemCat = if (categoryIdx >= 0 && categoryIdx < cells.size) cells[categoryIdx] else "默认分类"
-                    val itemLoc = if (locationIdx >= 0 && locationIdx < cells.size) cells[locationIdx] else "默认区域"
+                    val itemCode = cells.getOrNull(codeIdx)?.trim().orEmpty()
+                    val itemName = cells.getOrNull(nameIdx)?.trim().orEmpty()
+                    val itemCat = cells.getOrNull(categoryIdx)?.trim().orEmpty()
+                    val itemLoc = cells.getOrNull(locationIdx)?.trim().orEmpty()
 
                     val shouldCheckStr = if (shouldCheckIdx >= 0 && shouldCheckIdx < cells.size) cells[shouldCheckIdx] else "true"
                     val isCheck = !(shouldCheckStr.lowercase() == "false" || shouldCheckStr == "否" || shouldCheckStr == "0")
 
-                    // Skip corrupt rows with completely blank name/category
-                    if (itemName.isBlank() || itemCat.isBlank()) continue
+                    if (itemName.isBlank() || itemCat.isBlank()) return@withContext false
 
                     val itemUid = if (uuidIdx >= 0 && uuidIdx < cells.size && cells[uuidIdx].trim().isNotEmpty()) {
                         cells[uuidIdx].trim()
@@ -607,7 +603,7 @@ class StockRepository(
                             location = itemLoc,
                             originalCode = itemCode,
                             photoCount = 0,
-                            pdfStatus = "未生成",
+                            pdfStatus = InventoryConstants.PDF_STATUS_PENDING,
                             projectId = projectId,
                             shouldCheck = isCheck,
                             originalRowJson = toJsonList(cells),
@@ -627,6 +623,11 @@ class StockRepository(
             }
 
             if (newList.isNotEmpty()) {
+                val project = projectDao.getProjectById(projectId)
+                if (project != null && importedHeaders.isNotEmpty()) {
+                    val headerJson = toJsonList(importedHeaders)
+                    projectDao.insertProject(project.copy(columnHeadersJson = headerJson))
+                }
                 stockItemDao.insertAll(newList)
                 return@withContext true
             }
@@ -643,6 +644,7 @@ class StockRepository(
     suspend fun parseAndImportXlsx(context: Context, inputStream: InputStream, projectId: String, replace: Boolean): Boolean = withContext(Dispatchers.IO) {
         try {
             val newList = mutableListOf<StockItem>()
+            var importedHeaders: List<String> = emptyList()
             val wb = org.apache.poi.xssf.usermodel.XSSFWorkbook(inputStream)
             val sheet = wb.getSheetAt(0) ?: return@withContext false
             val firstRow = sheet.getRow(0) ?: return@withContext false
@@ -655,13 +657,7 @@ class StockRepository(
                 val value = cell?.toString()?.trim() ?: ""
                 headerList.add(value)
             }
-
-            // Save headers to Project
-            val project = projectDao.getProjectById(projectId)
-            if (project != null) {
-                val headerJson = toJsonList(headerList)
-                projectDao.insertProject(project.copy(columnHeadersJson = headerJson))
-            }
+            importedHeaders = headerList
 
             var nameColIdx = -1
             var categoryColIdx = -1
@@ -724,25 +720,6 @@ class StockRepository(
                 }
             }
 
-            if (nameColIdx == -1) {
-                if (headerList.size > 1) {
-                    nameColIdx = 1
-                } else if (headerList.isNotEmpty()) {
-                    nameColIdx = 0
-                }
-            }
-            if (categoryColIdx == -1) {
-                for (idx in headerList.indices) {
-                    if (idx != nameColIdx && idx != codeColIdx && idx != uuidColIdx) {
-                        categoryColIdx = idx
-                        break
-                    }
-                }
-                if (categoryColIdx == -1 && headerList.isNotEmpty()) {
-                    categoryColIdx = nameColIdx
-                }
-            }
-
             if (nameColIdx == -1 || categoryColIdx == -1) {
                 return@withContext false
             }
@@ -802,10 +779,12 @@ class StockRepository(
                     continue
                 }
 
-                val itemCode = rCells.getOrNull(codeColIdx)?.trim()?.ifEmpty { "E_${1000 + rowIdx}" } ?: "E_${1000 + rowIdx}"
-                val itemName = rCells.getOrNull(nameColIdx)?.trim()?.ifEmpty { "未命名盘点物 $rowIdx" } ?: "未命名盘点物 $rowIdx"
-                val itemCat = rCells.getOrNull(categoryColIdx)?.trim()?.ifEmpty { "默认分类" } ?: "默认分类"
-                val itemLoc = rCells.getOrNull(locationColIdx)?.trim()?.ifEmpty { "默认区域" } ?: "默认区域"
+                val itemCode = rCells.getOrNull(codeColIdx)?.trim().orEmpty()
+                val itemName = rCells.getOrNull(nameColIdx)?.trim().orEmpty()
+                val itemCat = rCells.getOrNull(categoryColIdx)?.trim().orEmpty()
+                val itemLoc = rCells.getOrNull(locationColIdx)?.trim().orEmpty()
+
+                if (itemName.isBlank() || itemCat.isBlank()) return@withContext false
 
                 val shouldCheckStr = rCells.getOrNull(shouldCheckColIdx)?.trim() ?: "true"
                 val isCheck = !(shouldCheckStr.lowercase() == "false" || shouldCheckStr == "否" || shouldCheckStr == "0")
@@ -825,7 +804,7 @@ class StockRepository(
                         location = itemLoc,
                         originalCode = itemCode,
                         photoCount = 0,
-                        pdfStatus = "未生成",
+                        pdfStatus = InventoryConstants.PDF_STATUS_PENDING,
                         projectId = projectId,
                         shouldCheck = isCheck,
                         originalRowJson = originalRowJsonStr,
@@ -844,6 +823,11 @@ class StockRepository(
             }
 
             if (newList.isNotEmpty()) {
+                val project = projectDao.getProjectById(projectId)
+                if (project != null && importedHeaders.isNotEmpty()) {
+                    val headerJson = toJsonList(importedHeaders)
+                    projectDao.insertProject(project.copy(columnHeadersJson = headerJson))
+                }
                 stockItemDao.insertAll(newList)
                 return@withContext true
             }
@@ -909,7 +893,7 @@ class StockRepository(
         }?.sortedBy { it.name }
 
         if (imageFiles.isNullOrEmpty()) {
-            updatePhotoState(item.uid, 0, "未生成")
+            updatePhotoState(item.uid, 0, InventoryConstants.PDF_STATUS_PENDING)
             return@withContext null
         }
 
@@ -924,7 +908,7 @@ class StockRepository(
         var writtenPages = 0
         var unreadableImage = false
         try {
-            val project = projectDao.getProjectById(item.projectId) ?: Project(id = item.projectId, name = "默认项目")
+            val project = projectDao.getProjectById(item.projectId) ?: Project(id = item.projectId, name = InventoryConstants.DEFAULT_PROJECT_NAME)
             val isWatermarkEnabled = project.watermarkEnabled
             val watermarkText = if (isWatermarkEnabled && project.watermarkTrEnabled) {
                 val prefix = getCategoryPrefix(context, item.category)
@@ -1404,7 +1388,7 @@ class StockRepository(
 
                 // Append the index Excel workbook "盘点表.xlsx" straight at the ZIP root folder
                 val tempXlsxFile = File(context.cacheDir, "temp_export_${UUID.randomUUID()}.xlsx")
-                val pId = items.firstOrNull()?.projectId ?: "default_project"
+                val pId = items.firstOrNull()?.projectId ?: InventoryConstants.DEFAULT_PROJECT_ID
                 generateXlsxReport(context, pId, items, tempXlsxFile)
                 if (tempXlsxFile.exists()) {
                     val proj = getProjectById(pId)
