@@ -17,11 +17,30 @@ object SharedPhotoLinks {
                     target
                 }.getOrElse { runCatching { source.copyTo(target, overwrite = true) }.getOrNull() }
             linked?.also {
-                if (distinctUids.size > 1) File(directory, ".${source.name}.shared").writeText(distinctUids.size.toString())
+                if (distinctUids.size > 1) File(directory, ".${source.name}.shared").writeText(distinctUids.joinToString("\n"))
             }
         }
     }
 
-    fun sharedCount(image: File): Int = File(image.parentFile, ".${image.name}.shared")
-        .takeIf { it.isFile }?.readText()?.trim()?.toIntOrNull()?.coerceAtLeast(1) ?: 1
+    fun linkedAssetUids(image: File): List<String> {
+        val value = File(image.parentFile, ".${image.name}.shared").takeIf { it.isFile }?.readText()?.trim().orEmpty()
+        if (value.isBlank() || value.toIntOrNull() != null) return emptyList()
+        return value.lines().map(String::trim).filter(String::isNotBlank).distinct()
+    }
+
+    fun sharedCount(image: File): Int {
+        val marker = File(image.parentFile, ".${image.name}.shared").takeIf { it.isFile } ?: return 1
+        val value = marker.readText().trim()
+        return value.toIntOrNull()?.coerceAtLeast(1) ?: value.lines().count { it.isNotBlank() }.coerceAtLeast(1)
+    }
+
+    fun deleteForAll(image: File, filesDir: File): List<String> {
+        val uids = linkedAssetUids(image)
+        uids.forEach { uid ->
+            val directory = File(filesDir, "photos/$uid")
+            File(directory, image.name).delete()
+            File(directory, ".${image.name}.shared").delete()
+        }
+        return uids
+    }
 }

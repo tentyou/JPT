@@ -406,12 +406,18 @@ fun CameraPreviewWidget(viewModel: StockViewModel, activeItem: StockItem) {
                         )
                     }
                     if (confirmDeletePhoto) {
+                        val sharedCount = selectedImageForFilter?.let(com.example.data.SharedPhotoLinks::sharedCount) ?: 1
                         AlertDialog(
                             onDismissRequest = { confirmDeletePhoto = false },
                             title = { Text("删除照片？") },
-                            text = { Text("删除后无法恢复，生成的 PDF 也会在下次生成时更新。") },
-                            confirmButton = { Button(onClick = { viewModel.deletePhoto(selectedImageForFilter!!); selectedImageForFilter = null; confirmDeletePhoto = false }) { Text("确认删除") } },
-                            dismissButton = { OutlinedButton(onClick = { confirmDeletePhoto = false }) { Text("取消") } }
+                            text = { Text(if (sharedCount > 1) "这张照片关联 $sharedCount 项资产。请选择删除范围。" else "删除后无法恢复，PDF 将同步更新。") },
+                            confirmButton = { Button(onClick = {
+                                if (sharedCount > 1) viewModel.deleteSharedPhotoForAll(selectedImageForFilter!!) else viewModel.deletePhoto(selectedImageForFilter!!)
+                                selectedImageForFilter = null; confirmDeletePhoto = false
+                            }) { Text(if (sharedCount > 1) "从全部资产删除" else "确认删除") } },
+                            dismissButton = { if (sharedCount > 1) OutlinedButton(onClick = {
+                                viewModel.deletePhoto(selectedImageForFilter!!); selectedImageForFilter = null; confirmDeletePhoto = false
+                            }) { Text("仅从当前资产移除") } else OutlinedButton(onClick = { confirmDeletePhoto = false }) { Text("取消") } }
                         )
                     }
                     if (confirmRetake) {

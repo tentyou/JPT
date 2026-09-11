@@ -17,6 +17,7 @@ class SharedPhotoLinksTest {
             assertEquals(3, links.size)
             links.forEach { assertArrayEquals(source.readBytes(), it.readBytes()) }
             links.forEach { assertEquals(3, SharedPhotoLinks.sharedCount(it)) }
+            assertEquals(listOf("asset-a", "asset-b", "asset-c"), SharedPhotoLinks.linkedAssetUids(links[1]))
             links[1].delete()
             assertArrayEquals(byteArrayOf(1, 2, 3, 4), source.readBytes())
         } finally {
