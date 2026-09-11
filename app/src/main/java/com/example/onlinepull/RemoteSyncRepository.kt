@@ -125,7 +125,13 @@ class RemoteSyncRepository(
                     originalCode = row.itemCode,
                     originalRowJson = stockRepository.toJsonList(listOf(row.subjectName, row.itemCode, row.itemName, row.companyName, row.worksheetKey)),
                     projectId = localProjectId,
-                    shouldCheck = if (conflict) prior?.shouldCheck ?: false else true,
+                    // A remote row enters the local checklist by default. Once present, keep the
+                    // user's local inclusion choice across later read-only synchronizations.
+                    shouldCheck = when {
+                        conflict -> prior?.shouldCheck ?: false
+                        existing?.active == true -> prior?.shouldCheck ?: true
+                        else -> true
+                    },
                     rowOrder = index + 1
                 )
                 if (prior == null) imported++ else updated++

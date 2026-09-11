@@ -46,6 +46,47 @@ fun ProjectInfoCard(project: Project?, fromRemote: Boolean, onEdit: () -> Unit) 
 }
 
 @Composable
+fun ProjectInfoInline(project: Project?, fromRemote: Boolean, onEdit: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("project_info_card"),
+        verticalArrangement = Arrangement.spacedBy(7.dp)
+    ) {
+        HorizontalDivider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = .12f))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (fromRemote) {
+                    if (project?.metadataLocallyEdited == true) "项目信息 · 本地修改" else "项目信息 · 线上同步"
+                } else "项目信息 · 本地项目",
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = .72f)
+            )
+            TextButton(onClick = onEdit, modifier = Modifier.height(32.dp).testTag("edit_project_info")) {
+                Text("编辑", style = MaterialTheme.typography.labelMedium)
+            }
+        }
+        InlineField(project?.baseDateLabel ?: "基准日", project?.baseDate.orEmpty())
+        InlineField(project?.companyLabel ?: "产权持有单位", project?.companyName.orEmpty())
+        InlineField("报告类型", project?.reportType.orEmpty())
+        if (fromRemote) Text(
+            "修改仅保存在本机，不影响线上数据。",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = .64f)
+        )
+    }
+}
+
+@Composable
+private fun InlineField(label: String, value: String) {
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(label, modifier = Modifier.width(88.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = .7f))
+        Text(value.ifBlank { "未设置" }, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
+    }
+}
+
+@Composable
 private fun ProjectInfoField(label: String, value: String) {
     Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         Text(label, modifier = Modifier.width(88.dp), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)

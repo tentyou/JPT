@@ -867,6 +867,9 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
 
                                          item {
                         TenkenDashboardHeader(
+                            project = currentProject,
+                            fromRemote = remoteLink != null,
+                            onEditProject = { showEditMetaDialog = true },
                             projectName = currentProjectName,
                             totalCount = stockItems.size,
                             pendingCount = stockItems.count { it.shouldCheck && it.pdfStatus != "已生成" },
@@ -888,138 +891,32 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
                     }
 
                     item {
-                        ProjectInfoCard(currentProject, remoteLink != null) { showEditMetaDialog = true }
-                        Spacer(Modifier.height(12.dp))
-                    }
-                    // Camera Watermarks Configuration & Live Preview Card
-                    item {
                         val watermarkEnabled by viewModel.watermarkEnabled.collectAsStateWithLifecycle()
-                        val activeProject by viewModel.activeProject.collectAsStateWithLifecycle()
-
                         ElevatedCard(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 6.dp),
+                            modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp)
                         ) {
-                            Column(modifier = Modifier.padding(14.dp)) {
-                                // NEW CARD STRUCTURE INTRODUCED HERE
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            imageVector = Icons.Default.PhotoCamera,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(
-                                            text = "图片水印",
-                                            style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
-
-                                    val isWatermarking by viewModel.isWatermarking.collectAsStateWithLifecycle()
-                                    if (isWatermarking) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier
-                                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
-                                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                                        ) {
-                                            CircularProgressIndicator(
-                                                modifier = Modifier.size(10.dp),
-                                                strokeWidth = 1.5.dp,
-                                                color = MaterialTheme.colorScheme.primary
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text("正在重构PDF...", fontSize = 9.sp, color = MaterialTheme.colorScheme.primary)
-                                        }
-                                    }
-                                }
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = "为「${activeProject?.name ?: "默认项目"}」启用自动水印",
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Text(
-                                            text = "包含右上角分类序号标签与左下角实勘定位存证，关闭则转换为无水印纯净PDF",
-                                            fontSize = 11.sp,
-                                            color = Color.Gray,
-                                            lineHeight = 15.sp,
-                                            modifier = Modifier.padding(top = 2.dp)
-                                        )
-                                    }
-                                    Switch(
-                                        checked = watermarkEnabled,
-                                        onCheckedChange = { targetState ->
-                                            showWatermarkConfirmDialog = targetState
-                                        },
-                                        modifier = Modifier.testTag("watermark_switch").scale(0.85f)
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("图片水印", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        if (isWatermarking) "正在更新已有 PDF…" else if (watermarkEnabled) "拍照信息与资产序号" else "已关闭",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
-
-                                Spacer(modifier = Modifier.height(10.dp))
-                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-                                Spacer(modifier = Modifier.height(10.dp))
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            imageVector = Icons.Default.Settings,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(14.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        val subCountText = remember(watermarkEnabled) {
-                                            if (watermarkEnabled) "右上角流水 + 左下角物理元数据" else "水印功能已关闭"
-                                        }
-                                        Text(
-                                            text = subCountText,
-                                            fontSize = 11.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-
-                                    Button(
-                                        onClick = { showWatermarkSettingsPage = true },
-                                        shape = RoundedCornerShape(8.dp),
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                                        ),
-                                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                                        modifier = Modifier.testTag("detailed_watermark_settings_button")
-                                    ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Icon(
-                                                imageVector = Icons.Default.Tune,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(13.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text("详细设置", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                        }
-                                    }
-                                }
+                                TextButton(
+                                    onClick = { showWatermarkSettingsPage = true },
+                                    modifier = Modifier.testTag("detailed_watermark_settings_button")
+                                ) { Text("设置") }
+                                Switch(
+                                    checked = watermarkEnabled,
+                                    onCheckedChange = { showWatermarkConfirmDialog = it },
+                                    modifier = Modifier.testTag("watermark_switch").scale(0.85f)
+                                )
                             }
                         }
                         Spacer(modifier = Modifier.height(10.dp))
@@ -1096,7 +993,7 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
                                     color = MaterialTheme.colorScheme.onBackground
                                 )
                                 Text(
-                                    text = if (remoteLink != null) "盘点范围由线上同步决定" else "勾选即纳入盘点",
+                                    text = if (remoteLink != null) "可在本地调整，后续同步保留" else "勾选即纳入盘点",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = Color.Gray
                                 )
@@ -1136,7 +1033,6 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
                                     ) {
                                         Checkbox(
                                             checked = item.shouldCheck,
-                                            enabled = remoteBindings.none { it.stockUid == item.uid },
                                             onCheckedChange = { isChecked ->
                                                 viewModel.updateItem(item.copy(shouldCheck = isChecked))
                                             },
@@ -1151,7 +1047,11 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
                                             )
-                                            CollapsibleMetadataSection(item = item, modifier = Modifier.padding(top = 2.dp))
+                                            CollapsibleMetadataSection(
+                                                item = item,
+                                                remoteBinding = remoteBindings.firstOrNull { it.stockUid == item.uid },
+                                                modifier = Modifier.padding(top = 2.dp)
+                                            )
                                         }
                                     }
                                 }
@@ -1876,6 +1776,9 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
 
 @Composable
 private fun TenkenDashboardHeader(
+    project: com.example.data.Project?,
+    fromRemote: Boolean,
+    onEditProject: () -> Unit,
     projectName: String,
     totalCount: Int,
     pendingCount: Int,
@@ -1962,6 +1865,8 @@ private fun TenkenDashboardHeader(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.72f)
             )
+            Spacer(modifier = Modifier.height(14.dp))
+            ProjectInfoInline(project = project, fromRemote = fromRemote, onEdit = onEditProject)
         }
     }
 }

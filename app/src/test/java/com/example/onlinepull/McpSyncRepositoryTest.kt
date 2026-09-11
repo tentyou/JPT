@@ -35,6 +35,7 @@ class McpSyncRepositoryTest {
         val first = repository.sync(project)
         val original = db.stockItemDao().getItemsByProjectSync(first.localProjectId).single()
         db.stockItemDao().updatePhotoState(original.uid, 2, "已生成")
+        db.stockItemDao().updateShouldCheck(original.uid, false)
         val photo = File(context.filesDir, "photos/${original.uid}/one.jpg").apply { parentFile!!.mkdirs(); writeText("photo-evidence") }
         val pdf = File(context.filesDir, "pdfs/${original.uid}/照片.pdf").apply { parentFile!!.mkdirs(); writeText("pdf-evidence") }
         db.projectDao().insertProject(db.projectDao().getProjectById(first.localProjectId)!!.copy(baseDate = "2026-09-11", watermarkEnabled = true, metadataLocallyEdited = true))
@@ -46,6 +47,7 @@ class McpSyncRepositoryTest {
         assertEquals(2, updated.photoCount)
         assertEquals("已生成", updated.pdfStatus)
         assertEquals("更新名称", updated.name)
+        assertFalse(updated.shouldCheck)
         assertEquals("photo-evidence", photo.readText())
         assertEquals("pdf-evidence", pdf.readText())
         assertEquals("2026-09-11", db.projectDao().getProjectById(first.localProjectId)!!.baseDate)

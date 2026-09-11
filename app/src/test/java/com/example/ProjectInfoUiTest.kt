@@ -29,7 +29,7 @@ class ProjectInfoUiTest {
     @get:Rule val compose = createComposeRule()
     @Test fun consultingInfoUsesCorrectLabelsAndExplainsLocalEdits() {
         compose.setContent { MyApplicationTheme { Surface {
-            ProjectInfoCard(Project(name = "咨询项目", baseDate = "2026-09-30", companyName = "测试产权单位", reportType = "咨询报告"), true, {})
+            ProjectInfoInline(Project(name = "咨询项目", baseDate = "2026-09-30", companyName = "测试产权单位", reportType = "咨询报告"), true, {})
         } } }
         compose.onNodeWithText("基准日").assertExists()
         compose.onNodeWithText("产权持有单位").assertExists()

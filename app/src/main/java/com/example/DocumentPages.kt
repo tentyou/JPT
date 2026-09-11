@@ -753,6 +753,7 @@ fun PdfPreviewDialog(
 @Composable
 fun CollapsibleMetadataSection(
     item: com.example.data.StockItem,
+    remoteBinding: com.example.data.RemoteAssetBinding? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -795,8 +796,11 @@ fun CollapsibleMetadataSection(
                 val itemsToDisplay = listOf(
                     Pair("设备编号", item.originalCode),
                     Pair("资产分类", item.category),
-                    Pair("存放位置", item.location),
-                    Pair("设备 UID", item.uid)
+                    Pair("存放位置", item.location)
+                ) + listOfNotNull(
+                    remoteBinding?.companyName?.takeIf { it.isNotBlank() }?.let { "所属单位" to it },
+                    remoteBinding?.subjectName?.takeIf { it.isNotBlank() && it != item.category }?.let { "底稿科目" to it },
+                    remoteBinding?.worksheetKey?.takeIf { it.isNotBlank() }?.let { "工作表" to it }
                 )
 
                 itemsToDisplay.forEach { (label, value) ->

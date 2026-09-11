@@ -494,10 +494,7 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun updateItem(item: StockItem) {
         viewModelScope.launch(Dispatchers.IO) {
-            // Preserve the synchronized value, including inactive/conflicted history records.
-            val binding = remoteSyncDao.bindingsForProject(item.projectId).firstOrNull { it.stockUid == item.uid }
-            val current = repository.getItemsByProjectSync(item.projectId).firstOrNull { it.uid == item.uid }
-            repository.insertItem(if (binding != null) item.copy(shouldCheck = current?.shouldCheck ?: false) else item)
+            repository.insertItem(item)
         }
     }
 
@@ -550,15 +547,11 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
                 canvas.drawText("存放所在位置: ${item.location}", 80f, 540f, paint)
                 canvas.drawText("系统设定分类: ${item.category}", 80f, 620f, paint)
 
-                paint.color = 0xFFF59E0B.toInt() // Amber accent code info
-                paint.textSize = 34f
-                canvas.drawText("系统底层 UID: ${item.uid}", 80f, 740f, paint)
-
                 paint.textSize = 32f
                 paint.color = 0xFF10B981.toInt() // Emerald accent time format
                 val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", java.util.Locale.getDefault())
                 val timestampStr = sdf.format(java.util.Date())
-                canvas.drawText("数字签章时间戳: $timestampStr", 80f, 820f, paint)
+                canvas.drawText("数字签章时间戳: $timestampStr", 80f, 740f, paint)
 
                 paint.textSize = 28f
                 paint.color = 0xFF64748B.toInt()

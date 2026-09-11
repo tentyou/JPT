@@ -564,8 +564,7 @@ fun StockItemRow(
                     val itemsToDisplay = listOf(
                         Pair("设备编号", item.originalCode),
                         Pair("资产分类", item.category),
-                        Pair("存放位置", item.location),
-                        Pair("设备 UID", item.uid)
+                        Pair("存放位置", item.location)
                     )
 
                     itemsToDisplay.forEach { (label, value) ->
