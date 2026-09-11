@@ -126,8 +126,21 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val coroutineScope = rememberCoroutineScope()
 
-    // Tab Index: 0 = 待盘点设备 (Only shouldCheck == true), 1 = 台账管理 (All items with shouldCheck toggles)
-    var activeTab by remember { mutableStateOf(0) }
+    var assetFilter by remember { mutableStateOf("待盘点") }
+    var batchMode by remember { mutableStateOf(false) }
+    var selectedAssetUids by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var assetSearch by remember { mutableStateOf("") }
+    val filteredStockItems = stockItems.filter { item ->
+        when (assetFilter) {
+            "待盘点" -> item.shouldCheck && item.pdfStatus != "已生成"
+            "已完成" -> item.shouldCheck && item.pdfStatus == "已生成"
+            "已排除" -> !item.shouldCheck
+            else -> true
+        }
+    }.filter { item ->
+        val query = assetSearch.trim()
+        query.isEmpty() || listOf(item.name, item.originalCode, item.category, item.location).any { it.contains(query, ignoreCase = true) }
+    }
 
     // Document Import Launcher supporting CSV & XLSX
     val documentImportLauncher = rememberLauncherForActivityResult(
@@ -296,7 +309,7 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
                             if (success) {
                                 Toast.makeText(context, "数据导入映射匹配成功！", Toast.LENGTH_SHORT).show()
                             } else {
-                                Toast.makeText(context, "直接导入失败，请核实文件列名与是否拥有布尔点检列", Toast.LENGTH_LONG).show()
+                                Toast.makeText(context, "直接导入失败，请核实文件列名与“是否盘点”列", Toast.LENGTH_LONG).show()
                             }
                         }
                         pendingImportUri = null
@@ -829,7 +842,7 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
-                                    text = "系统提示：请新建一个分类项目，或在无线端或左侧菜单栏添加新项目，以启用点检盘点功能。",
+                                    text = "请新建项目，或通过线上同步、无线端导入项目后开始盘点。",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     textAlign = TextAlign.Center,
@@ -945,41 +958,54 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
                     if (remoteLink == null) {
                         item { OutlinedButton(onClick = { showSamplingDialog = true }, modifier = Modifier.testTag("sampling_button")) { Text("分类抽样") } }
                     }
-                    // Tab switching rows: 0 = 待盘点设备(filtered shouldCheck == true), 1 = 全量台账(show checkboxes)
                     item {
-                        TabRow(
-                            selectedTabIndex = activeTab,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(44.dp),
-                            containerColor = Color.Transparent,
-                            divider = {}
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Tab(
-                                selected = (activeTab == 0),
-                                onClick = { activeTab = 0 }
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Inventory, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("待盘点清单", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                }
+                            Text("盘点资产", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            TextButton(onClick = {
+                                batchMode = !batchMode
+                                if (!batchMode) selectedAssetUids = emptySet()
+                            }) { Text(if (batchMode) "退出批量" else "批量选择") }
+                        }
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(listOf("待盘点", "已完成", "全部", "已排除")) { filter ->
+                                FilterChip(
+                                    selected = assetFilter == filter,
+                                    onClick = { assetFilter = filter },
+                                    label = { Text(filter) }
+                                )
                             }
-                            Tab(
-                                selected = (activeTab == 1),
-                                onClick = { activeTab = 1 }
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.ListAlt, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("台账预览 (${checkedCount}项/${totalCount}项)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                }
+                        }
+                        OutlinedTextField(
+                            value = assetSearch,
+                            onValueChange = { assetSearch = it },
+                            modifier = Modifier.fillMaxWidth().testTag("asset_search"),
+                            singleLine = true,
+                            label = { Text("搜索名称、编号、分类或位置") },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) }
+                        )
+                        if (batchMode) Column {
+                            val anchor = stockItems.firstOrNull { it.uid in selectedAssetUids }
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                item { TextButton(onClick = {
+                                    selectedAssetUids = filteredStockItems.filter { it.shouldCheck }.map { it.uid }.toSet()
+                                }) { Text("全选当前结果") } }
+                                if (!anchor?.location.isNullOrBlank()) item { TextButton(onClick = {
+                                    selectedAssetUids = stockItems.filter { it.shouldCheck && it.location == anchor?.location }.map { it.uid }.toSet()
+                                }) { Text("同位置") } }
+                                if (!anchor?.category.isNullOrBlank()) item { TextButton(onClick = {
+                                    selectedAssetUids = stockItems.filter { it.shouldCheck && it.category == anchor?.category }.map { it.uid }.toSet()
+                                }) { Text("同科目") } }
+                                item { TextButton(onClick = { selectedAssetUids = emptySet() }) { Text("清空") } }
                             }
+                            Text("已选 ${selectedAssetUids.size} 项", style = MaterialTheme.typography.bodySmall)
                         }
                         Spacer(modifier = Modifier.height(12.dp))
                     }
 
-                    if (activeTab == 1) {
                         item {
                             Row(
                                 modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -987,7 +1013,12 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "台账预览 (${checkedCount}项/${totalCount}项)",
+                                    text = when (assetFilter) {
+                                        "待盘点" -> "待盘点资产"
+                                        "已完成" -> "已完成资产"
+                                        "已排除" -> "已排除资产"
+                                        else -> "全部资产"
+                                    } + "（${checkedCount}/${totalCount}）",
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onBackground
@@ -1009,7 +1040,7 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
                                 )
                             }
                         } else {
-                            items(stockItems, key = { it.uid }) { item ->
+                            items(filteredStockItems, key = { it.uid }) { item ->
                                 val seq = try {
                                     if (item.originalRowJson.isNotEmpty()) {
                                         val m = Regex("\"([^\"]*)\"").find(item.originalRowJson)
@@ -1031,12 +1062,17 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
                                             .padding(horizontal = 12.dp, vertical = 10.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Checkbox(
-                                            checked = item.shouldCheck,
-                                            onCheckedChange = { isChecked ->
-                                                viewModel.updateItem(item.copy(shouldCheck = isChecked))
+                                        if (batchMode) Checkbox(
+                                            checked = item.uid in selectedAssetUids,
+                                            enabled = item.shouldCheck,
+                                            onCheckedChange = { checked ->
+                                                selectedAssetUids = if (checked) selectedAssetUids + item.uid else selectedAssetUids - item.uid
                                             },
-                                            modifier = Modifier.testTag("checkbox_${item.uid}")
+                                            modifier = Modifier.testTag("batch_checkbox_${item.uid}")
+                                        ) else Switch(
+                                            checked = item.shouldCheck,
+                                            onCheckedChange = { viewModel.updateItem(item.copy(shouldCheck = it)) },
+                                            modifier = Modifier.testTag("checkbox_${item.uid}").scale(.8f)
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Column(modifier = Modifier.weight(1f)) {
@@ -1052,78 +1088,31 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
                                                 remoteBinding = remoteBindings.firstOrNull { it.stockUid == item.uid },
                                                 modifier = Modifier.padding(top = 2.dp)
                                             )
+                                            if (!batchMode && item.shouldCheck) TextButton(
+                                                onClick = { viewModel.startPhotoCapture(item) },
+                                                contentPadding = PaddingValues(0.dp)
+                                            ) { Text(if (item.photoCount > 0) "继续拍照" else "开始盘点拍照") }
                                         }
                                     }
                                 }
                             }
-                        }
-                    } else {
-                        item {
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "需要盘点的资产",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onBackground
-                                )
-                                Text(
-                                    text = "共计 ${checkedCount} 项需盘点设备/台账共 ${totalCount} 项",
+                            if (batchMode) item {
+                                Button(
+                                    onClick = {
+                                        viewModel.startSharedPhotoCapture(stockItems.filter { it.uid in selectedAssetUids })
+                                        batchMode = false
+                                        selectedAssetUids = emptySet()
+                                    },
+                                    enabled = selectedAssetUids.size >= 2,
+                                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp).testTag("shared_photo_capture")
+                                ) { Text("共用照片盘点（${selectedAssetUids.size} 项）") }
+                                if (selectedAssetUids.size == 1) Text(
+                                    "至少选择两项资产；单项可直接使用“开始盘点拍照”。",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.outline
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            Spacer(modifier = Modifier.height(8.dp))
                         }
-
-                        if (mainCheckList.isEmpty()) {
-                            item {
-                                Card(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 12.dp),
-                                    shape = RoundedCornerShape(12.dp),
-                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-                                ) {
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(24.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally
-                                    ) {
-                                        Icon(Icons.Default.AssignmentLate, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(36.dp))
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        Text(
-                                            text = "本分类项目当前暂无激活点检任务",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.Gray
-                                        )
-                                        Text(
-                                            text = "请切换至「全部台账管理」选项卡勾选要点检盘点的设备，或导入外部台账。",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = Color.LightGray,
-                                            textAlign = TextAlign.Center,
-                                            modifier = Modifier.padding(top = 4.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        } else {
-                            items(mainCheckList, key = { it.uid }) { item ->
-                                StockItemRow(
-                                    item = item,
-                                    onCameraClick = { viewModel.startPhotoCapture(item) },
-                                    onPdfClick = { viewModel.manualGeneratePdf(item) },
-                                    onDeletePdfClick = { viewModel.deleteItemPdf(item) }
-                                )
-                                Spacer(modifier = Modifier.height(6.dp))
-                            }
-                        }
-                    }
                 }
 
                 // Export Actions Sticky Bar (Floating Bottom Drawer Style)
@@ -1390,7 +1379,7 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
                             value = customReportTypeState,
                             onValueChange = { customReportTypeState = it },
                             label = { Text("输入自定义分类名称", fontSize = 11.sp) },
-                            placeholder = { Text("如：内审点检报告", color = Color.Gray, fontSize = 11.sp) },
+                            placeholder = { Text("如：资产监盘报告", color = Color.Gray, fontSize = 11.sp) },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(top = 4.dp)
@@ -1538,7 +1527,7 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
                             value = customReportTypeState,
                             onValueChange = { customReportTypeState = it },
                             label = { Text("输入自定义分类名称", fontSize = 11.sp) },
-                            placeholder = { Text("如：内审点检报告", color = Color.Gray, fontSize = 11.sp) },
+                            placeholder = { Text("如：资产监盘报告", color = Color.Gray, fontSize = 11.sp) },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(top = 4.dp),
@@ -1736,7 +1725,7 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
             },
             text = {
                 Text(
-                    text = "您正在对分类项目「${projToDelete.name}」进行彻底彻底的毁灭性清扫！\n\n警告：这将会彻底物理抹去该项目内所有的资产单据信息、关联的所有实物存证拍照及已归纳生成的 PDF 电子盘点点检单（其他不受影响）。该行为完全物理执行，绝对无法撤回！",
+                    text = "确认删除项目「${projToDelete.name}」？\n\n该项目的资产记录、现场照片和 PDF 将从本机永久删除，无法撤回。其他项目不受影响。",
                     style = MaterialTheme.typography.bodyMedium
                 )
             },
@@ -1799,7 +1788,7 @@ private fun TenkenDashboardHeader(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "TENKEN · 现场盘点工作台",
+                        text = "监盘通 · 现场盘点工作台",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.secondary,
                         fontWeight = FontWeight.Bold

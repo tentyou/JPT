@@ -910,7 +910,7 @@ class StockRepository(
         try {
             val project = projectDao.getProjectById(item.projectId) ?: Project(id = item.projectId, name = InventoryConstants.DEFAULT_PROJECT_NAME)
             val isWatermarkEnabled = project.watermarkEnabled
-            val watermarkText = if (isWatermarkEnabled && project.watermarkTrEnabled) {
+            val baseWatermarkText = if (isWatermarkEnabled && project.watermarkTrEnabled) {
                 val prefix = getCategoryPrefix(context, item.category)
                 val allProjectItems = getItemsByProjectSync(item.projectId).filter { it.category == item.category }
                 val sortedItems = allProjectItems.sortedBy { it.originalCode.ifEmpty { it.uid } }
@@ -920,6 +920,8 @@ class StockRepository(
             } else null
 
             for (imageFile in imageFiles) {
+                val sharedCount = SharedPhotoLinks.sharedCount(imageFile)
+                val watermarkText = baseWatermarkText?.let { if (sharedCount > 1) "$it · 共用盘点${sharedCount}项" else it }
                 // Resize during load to ensure extremely low RAM and compact file footprint
                 val bitmap = getResizedBitmap(imageFile.absolutePath, 1200)
                 if (bitmap == null) {

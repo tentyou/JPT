@@ -27,7 +27,7 @@ else
   gh release create "$tag" "$apk" "${apk}.sha256" \
     --target "$GITHUB_SHA" \
     --draft \
-    --title "点检 · 构建 ${GITHUB_RUN_NUMBER}" \
+    --title "监盘通 · 构建 ${GITHUB_RUN_NUMBER}" \
     --notes-file "$notes"
 fi
 

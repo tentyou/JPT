@@ -53,6 +53,8 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
     // Current capturing stock item
     private val _activeItemForPhoto = MutableStateFlow<StockItem?>(null)
     val activeItemForPhoto = _activeItemForPhoto.asStateFlow()
+    private val _activeCaptureItems = MutableStateFlow<List<StockItem>>(emptyList())
+    val activeCaptureItems = _activeCaptureItems.asStateFlow()
 
     // Track active item photo files for instant camera overlay updates
     private val _activeSessionPhotos = MutableStateFlow<List<File>>(emptyList())
@@ -325,8 +327,30 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
      * Triggers active camera session for an item
      */
     fun startPhotoCapture(item: StockItem) {
+        _activeCaptureItems.value = listOf(item)
         _activeItemForPhoto.value = item
         refreshActiveSessionPhotos(item.uid)
+    }
+
+    fun startSharedPhotoCapture(items: List<StockItem>) {
+        val targets = items.distinctBy { it.uid }
+        if (targets.isEmpty()) return
+        _activeCaptureItems.value = targets
+        _activeItemForPhoto.value = targets.first()
+        refreshActiveSessionPhotos(targets.first().uid)
+    }
+
+    fun photoTarget(activeItem: StockItem): File = File(
+        context.filesDir,
+        "photos/${activeItem.uid}/photo_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(5)}.jpg"
+    ).also { it.parentFile?.mkdirs() }
+
+    fun registerCapturedPhoto(source: File, activeItem: StockItem) {
+        val targets = _activeCaptureItems.value.ifEmpty { listOf(activeItem) }
+        viewModelScope.launch(Dispatchers.IO) {
+            com.example.data.SharedPhotoLinks.link(source, targets.map { it.uid })
+            withContext(Dispatchers.Main) { refreshActiveSessionPhotos(activeItem.uid) }
+        }
     }
 
     /**
@@ -334,31 +358,38 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun endPhotoCapture(onDismissUi: () -> Unit) {
         val item = _activeItemForPhoto.value
+        val captureItems = _activeCaptureItems.value.ifEmpty { listOfNotNull(item) }
         if (item != null) {
             // Dismiss UI IMMEDIATELY
             _activeItemForPhoto.value = null
+            _activeCaptureItems.value = emptyList()
             _activeSessionPhotos.value = emptyList()
             onDismissUi()
 
             // Perform PDF compilation in background asynchronously
             viewModelScope.launch(Dispatchers.IO) {
-                val currentPhotoCount = repository.countPhotos(context, item.uid)
-                if (currentPhotoCount > 0) {
-                    val freshPdf = repository.generatePdfForItem(context, item)
-                    if (freshPdf != null && freshPdf.exists()) {
-                        repository.updatePhotoState(item.uid, currentPhotoCount, InventoryConstants.PDF_STATUS_GENERATED)
-                        _backgroundPdfMessage.value = "资产「${item.name}」的现场照片记录 PDF 已生成。"
+                var completed = 0
+                captureItems.forEach { target ->
+                    val currentPhotoCount = repository.countPhotos(context, target.uid)
+                    if (currentPhotoCount > 0) {
+                        val freshPdf = repository.generatePdfForItem(context, target)
+                        if (freshPdf != null && freshPdf.exists()) {
+                            repository.updatePhotoState(target.uid, currentPhotoCount, InventoryConstants.PDF_STATUS_GENERATED)
+                            completed++
+                        } else {
+                            repository.updatePhotoState(target.uid, currentPhotoCount, "未生成")
+                            repository.cancelUploadForStock(target.uid)
+                        }
                     } else {
-                        repository.updatePhotoState(item.uid, currentPhotoCount, "未生成")
-                        repository.cancelUploadForStock(item.uid)
+                        repository.updatePhotoState(target.uid, 0, "未生成")
+                        repository.cancelUploadForStock(target.uid)
                     }
-                } else {
-                    repository.updatePhotoState(item.uid, 0, "未生成")
-                    repository.cancelUploadForStock(item.uid)
                 }
+                _backgroundPdfMessage.value = if (captureItems.size > 1) "共用照片已关联 ${captureItems.size} 项资产，生成 $completed 份盘点 PDF。" else "资产「${item.name}」的现场照片记录 PDF 已生成。"
             }
         } else {
             _activeItemForPhoto.value = null
+            _activeCaptureItems.value = emptyList()
             _activeSessionPhotos.value = emptyList()
             onDismissUi()
         }

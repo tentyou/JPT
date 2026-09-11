@@ -131,7 +131,7 @@ fun TutorialGuideCard(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "点检 · 快速上手新手指引",
+                        text = "监盘通 · 快速上手",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
@@ -151,7 +151,7 @@ fun TutorialGuideCard(
             }
 
             Text(
-                text = "欢迎使用点检系统！跟随以下4步快速体验核心工作流：",
+                text = "欢迎使用监盘通！跟随以下 4 步体验现场盘点流程：",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f),
                 fontWeight = FontWeight.Medium
@@ -643,7 +643,7 @@ fun EmptyStateView(
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "工作提示：请导入底账资产数据表格进行点检盘点。",
+                text = "工作提示：请同步或导入资产台账后开始现场盘点。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,

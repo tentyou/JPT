@@ -75,7 +75,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
-import java.util.UUID
 
 @Composable
 fun CameraCaptureScreen(viewModel: StockViewModel, activeItem: StockItem) {
@@ -187,6 +186,7 @@ fun CameraPreviewWidget(viewModel: StockViewModel, activeItem: StockItem) {
 
     // Load active item session photo files
     val sessionPhotos by viewModel.activeSessionPhotos.collectAsStateWithLifecycle()
+    val captureItems by viewModel.activeCaptureItems.collectAsStateWithLifecycle()
     var selectedImageForFilter by remember { mutableStateOf<File?>(null) }
     var confirmRetake by remember { mutableStateOf(false) }
     var confirmDeletePhoto by remember { mutableStateOf(false) }
@@ -290,7 +290,7 @@ fun CameraPreviewWidget(viewModel: StockViewModel, activeItem: StockItem) {
 
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    text = activeItem.name,
+                    text = if (captureItems.size > 1) "共用盘点 · ${captureItems.size} 项资产" else activeItem.name,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
@@ -509,12 +509,7 @@ fun CameraPreviewWidget(viewModel: StockViewModel, activeItem: StockItem) {
                                 return@clickable
                             }
 
-                            // Build unique photo path under filesDir/photos/{item.uid}/
-                            val targetFile = File(
-                                context.filesDir,
-                                "photos/${activeItem.uid}/photo_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(5)}.jpg"
-                            )
-                            targetFile.parentFile?.mkdirs()
+                            val targetFile = viewModel.photoTarget(activeItem)
 
                             val outputOptions = ImageCapture.OutputFileOptions
                                 .Builder(targetFile)
@@ -535,9 +530,7 @@ fun CameraPreviewWidget(viewModel: StockViewModel, activeItem: StockItem) {
                                     override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
                                         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
                                             com.example.util.PhotoMetadataUtils.writePhysicalMetadata(context, targetFile, activeItem)
-                                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                                                viewModel.refreshActiveSessionPhotos(activeItem.uid)
-                                            }
+                                            viewModel.registerCapturedPhoto(targetFile, activeItem)
                                         }
                                     }
 
