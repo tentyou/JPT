@@ -82,7 +82,7 @@ APK 输出：`app/build/outputs/apk/debug/app-debug.apk`。测试报告和截图
 
 GitHub Actions 执行测试并构建调试 APK。`main` 分支推送或手动运行成功后，会自动创建 GitHub Release，并附带 APK 和 SHA-256 校验文件；标签格式为 `build-构建序号-提交短哈希`，重跑同一次构建会复用原标签。其他分支和 PR 只执行构建验证，所有构建仍会保留 Actions Artifact。
 
-最新安装包：[GitHub Releases](https://github.com/tentyou/Tenken/releases/latest)。当前自动发布的是调试签名 APK；正式分发签名仍按上文的签名配置单独构建。
+最新安装包：[GitHub Releases](https://github.com/tentyou/JPT/releases/latest)。当前自动发布的是调试签名 APK；正式分发签名仍按上文的签名配置单独构建。
 
 ### 可选真实 MCP 联调
 
