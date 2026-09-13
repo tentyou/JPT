@@ -917,20 +917,21 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
                     val checkedCount = mainCheckList.size
                     val totalCount = stockItems.size
 
-                    if (remoteLink == null) {
-                        item { OutlinedButton(onClick = { showSamplingDialog = true }, modifier = Modifier.testTag("sampling_button")) { Text("分类抽样") } }
-                    }
                     item {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("盘点资产", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text("盘点资产", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                            if (remoteLink == null) {
+                                TextButton(onClick = { showSamplingDialog = true }, modifier = Modifier.testTag("sampling_button")) {
+                                    Text("分类抽样")
+                                }
+                            }
                             TextButton(onClick = {
                                 batchMode = !batchMode
                                 if (!batchMode) selectedAssetUids = emptySet()
-                            }) { Text(if (batchMode) "退出批量" else "批量选择") }
+                            }) { Text(if (batchMode) "退出选择" else "多项共拍") }
                         }
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             items(listOf("待盘点", "已完成", "全部", "已排除")) { filter ->

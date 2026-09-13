@@ -20,13 +20,30 @@ jobs:
           distribution: temurin
       - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v4
-      - name: Test and build
-        run: bash ./gradlew :app:testDebugUnitTest :app:assembleDebug
-      - name: Upload debug APK
+      - name: Test
+        run: bash ./gradlew :app:testDebugUnitTest
+      - name: Build debug APK
+        if: github.ref != 'refs/heads/main'
+        run: bash ./gradlew :app:assembleDebug
+      - name: Restore signing key
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/jianpantong-release.jks"
+      - name: Build signed release APK
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          KEYSTORE_PATH: ${{ runner.temp }}/jianpantong-release.jks
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: bash ./gradlew :app:assembleRelease
+      - name: Upload signed release APK
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: jianpantong-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: jianpantong-release
+          path: app/build/outputs/apk/release/app-release.apk
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -46,7 +63,7 @@ jobs:
       - name: Download tested APK
         uses: actions/download-artifact@v4
         with:
-          name: jianpantong-debug
+          name: jianpantong-release
           path: release-artifacts
       - name: Publish tested APK
         env:

@@ -2,10 +2,10 @@
 set -euo pipefail
 
 tag="build-${GITHUB_RUN_NUMBER}-${GITHUB_SHA:0:7}"
-apk="jianpantong-${tag}-debug.apk"
+apk="jianpantong-${tag}-release.apk"
 notes="${RUNNER_TEMP}/jianpantong-release-notes.md"
 
-cp release-artifacts/app-debug.apk "$apk"
+cp release-artifacts/app-release.apk "$apk"
 sha256sum "$apk" > "${apk}.sha256"
 
 cat > "$notes" <<EOF
@@ -14,7 +14,7 @@ cat > "$notes" <<EOF
 - 提交：${GITHUB_SHA}
 - 构建与测试报告：https://github.com/${GH_REPO}/actions/runs/${GITHUB_RUN_ID}
 - 下载下方 APK 可直接安装；另附 SHA-256 校验文件。
-- 当前产物使用调试签名，不是应用商店正式签名版本。
+- 当前产物使用项目所有者提供的正式签名，可用于后续覆盖升级。
 EOF
 
 if gh release view "$tag" --json isDraft >/dev/null 2>&1; then
