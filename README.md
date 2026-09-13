@@ -2,8 +2,6 @@
 
 基于 MCP 的资产现场盘点与数字取证平台。
 
-大赛资料：[作品说明书](docs/competition/作品说明书.md) · [演示材料](docs/competition/演示材料.md) · [可复现材料](docs/competition/可复现材料.md)。可直接提交的 [Word 说明书](docs/competition/监盘通-作品说明书.docx)、[PowerPoint](docs/competition/监盘通-演示材料.pptx) 和 [Word 可复现材料](docs/competition/监盘通-可复现材料.docx) 与源稿一同维护。
-
 Android 资产盘点工具。通过公司 MCP 获取项目和应盘资产，在现场离线拍照、添加水印、生成 PDF，并导出 ZIP 资料。
 
 ## 开始使用
