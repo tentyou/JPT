@@ -70,7 +70,7 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
     private val _deviceIpAddress = MutableStateFlow<String?>(null)
     val deviceIpAddress = _deviceIpAddress.asStateFlow()
 
-    private val prefs = context.getSharedPreferences("dianjian_prefs", Context.MODE_PRIVATE)
+    private val prefs = context.getSharedPreferences("jianpantong_prefs", Context.MODE_PRIVATE)
     
     private val _showTutorial = MutableStateFlow(prefs.getBoolean("show_tutorial", true))
     val showTutorial = _showTutorial.asStateFlow()

@@ -97,7 +97,7 @@ private fun ProjectInfoField(label: String, value: String) {
 @Composable
 fun WifiTransferToolbar(enabled: Boolean, address: String?, onToggle: (Boolean) -> Unit, onCopy: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("Wi-Fi", style = MaterialTheme.typography.labelSmall)
+        Text("Wi-Fi 传输", style = MaterialTheme.typography.labelSmall)
         Switch(checked = enabled, onCheckedChange = onToggle, modifier = Modifier.height(32.dp).testTag("wifi_toolbar_switch"))
         if (enabled) TextButton(onClick = onCopy, enabled = address != null, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp), modifier = Modifier.height(32.dp).testTag("copy_transfer_address")) {
             Text("复制传输地址", style = MaterialTheme.typography.labelMedium)

@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item
-        android:width="66dp"
-        android:height="66dp"
-        android:drawable="@drawable/dianjian_icon"
-        android:gravity="center" />
-</layer-list>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#1677FF"
+        android:fillType="evenOdd"
+        android:pathData="M54,14A40,40 0,1 1,54,94A40,40 0,1 1,54,14M54,25A29,29 0,1 0,54,83A29,29 0,1 0,54,25" />
+</vector>

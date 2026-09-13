@@ -442,45 +442,15 @@ fun CameraPreviewWidget(viewModel: StockViewModel, activeItem: StockItem) {
             ) {
                 Text(
                     text = if (sessionPhotos.isEmpty()) {
-                        "提示：按白色内环快门可以连拍多张实物图，最后点完成即合并PDF！"
+                        "按白色按钮拍照，可连续拍摄多张；拍完后点击完成。"
                     } else {
-                        "已拍摄 ${sessionPhotos.size} 张多角度物理卡片"
+                        "已拍摄 ${sessionPhotos.size} 张照片"
                     },
                     textAlign = TextAlign.Center,
                     style = MaterialTheme.typography.bodySmall,
                     color = Color.LightGray.copy(alpha = 0.8f)
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                if (com.example.BuildConfig.DEBUG) {
-                    Button(
-                        onClick = {
-                            viewModel.simulateCapture(activeItem)
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.4f),
-                        contentColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier
-                        .testTag("simulate_capture_button")
-                        .height(32.dp),
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.FlashOn,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp),
-                        tint = Color.Yellow
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "云测试/无硬件？一键模拟实物拍照存证",
-                        fontSize = 11.sp,
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold
-                    )
-                    }
-                }
             }
 
             // Part B: Large physical-shutter buttons

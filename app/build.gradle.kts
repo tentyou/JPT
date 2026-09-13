@@ -10,11 +10,11 @@ android {
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.aistudio.inventoryhelper.pdskra"
+    applicationId = "net.zhrdc.jianpantong"
     minSdk = 26
     targetSdk = 36
-    versionCode = 2
-    versionName = "1.1"
+    versionCode = 3
+    versionName = "1.2"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

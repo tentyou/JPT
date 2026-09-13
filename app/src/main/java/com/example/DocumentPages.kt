@@ -94,214 +94,86 @@ fun WatermarkSettingsPage(
     val showTime by viewModel.watermarkBlShowTime.collectAsStateWithLifecycle()
     val showGps by viewModel.watermarkBlShowGps.collectAsStateWithLifecycle()
     val showAddress by viewModel.watermarkBlShowAddress.collectAsStateWithLifecycle()
-    val blAddress by viewModel.watermarkBlAddress.collectAsStateWithLifecycle()
-    val blLat by viewModel.watermarkBlLat.collectAsStateWithLifecycle()
-    val blLng by viewModel.watermarkBlLng.collectAsStateWithLifecycle()
     val isWatermarking by viewModel.isWatermarking.collectAsStateWithLifecycle()
     val stockItems by viewModel.stockItems.collectAsStateWithLifecycle()
+
+    LaunchedEffect(watermarkEnabled, blEnabled) {
+        if (watermarkEnabled && !blEnabled) viewModel.updateWatermarkBlSettings(enabled = true)
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Column {
-                        Text(
-                            text = "专属水印相机参数配置",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "当前项目: ${activeProject?.name ?: "默认项目"}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Text("图片水印设置", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text("当前项目：${activeProject?.name ?: "默认项目"}", style = MaterialTheme.typography.bodySmall)
                     }
                 },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
-                        Icon(
-                            imageVector = Icons.Default.ArrowBack,
-                            contentDescription = "返回主页"
-                        )
+                        Icon(Icons.Default.ArrowBack, contentDescription = "返回")
                     }
                 },
                 actions = {
-                    if (isWatermarking) {
-                        CircularProgressIndicator(
-                            modifier = Modifier
-                                .padding(end = 16.dp)
-                                .size(20.dp),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    } else {
-                        IconButton(onClick = {
-                            // Force-trigger refresh/validation of PDF cache on this project
-                            viewModel.setWatermarkEnabled(watermarkEnabled)
-                        }) {
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = "重构PDF缓存",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface
-                )
+                    if (isWatermarking) CircularProgressIndicator(Modifier.padding(end = 16.dp).size(20.dp), strokeWidth = 2.dp)
+                }
             )
         }
     ) { innerPadding ->
         LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.background)
-                .padding(innerPadding)
-                .padding(horizontal = 16.dp)
+            modifier = Modifier.fillMaxSize().padding(innerPadding).padding(horizontal = 16.dp),
+            contentPadding = PaddingValues(vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             item {
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Card 1: Main Toggle
-                ElevatedCard(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "启用本项专属自动水印",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 15.sp
-                                )
-                                Text(
-                                    text = "实时开关：关闭自动转换为无水印纯净版PDF，开启自动附加物理实勘定位",
-                                    fontSize = 11.sp,
-                                    color = Color.Gray,
-                                    lineHeight = 15.sp,
-                                    modifier = Modifier.padding(top = 2.dp)
-                                )
-                            }
-                            Switch(
-                                checked = watermarkEnabled,
-                                onCheckedChange = { viewModel.setWatermarkEnabled(it) },
-                                modifier = Modifier.testTag("full_page_watermark_main_switch").scale(0.9f)
-                            )
+                ElevatedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
+                    Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("启用水印", fontWeight = FontWeight.Bold)
+                            Text("水印关闭后导出 PDF 将均不带有水印。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
+                        Switch(
+                            checked = watermarkEnabled,
+                            onCheckedChange = {
+                                viewModel.setWatermarkEnabled(it)
+                                viewModel.updateWatermarkBlSettings(enabled = it)
+                            },
+                            modifier = Modifier.testTag("full_page_watermark_main_switch")
+                        )
                     }
                 }
             }
 
             if (watermarkEnabled) {
-                // Widget 2: Top-right sequence watermarks
                 item {
-                    ElevatedCard(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 8.dp),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.Tune,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "右上角分类流水号标签",
-                                    fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "附加红色独立实勘流水标签",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 13.sp
-                                    )
-                                    Text(
-                                        text = "根据台账前缀与设备序列自动生成类似于 [C4-6-4-0001] 的红色序列贴纸",
-                                        fontSize = 11.sp,
-                                        color = Color.Gray
-                                    )
-                                }
+                    ElevatedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
+                        Column(Modifier.fillMaxWidth().padding(14.dp)) {
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Text("自动索引编号", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                                 Switch(
                                     checked = watermarkTrEnabled,
-                                    onCheckedChange = { viewModel.updateWatermarkTrSetting(it) },
-                                    modifier = Modifier.testTag("tr_setting_switch").scale(0.85f)
+                                    onCheckedChange = viewModel::updateWatermarkTrSetting,
+                                    modifier = Modifier.testTag("tr_setting_switch")
                                 )
                             }
-
                             if (watermarkTrEnabled) {
-                                Spacer(modifier = Modifier.height(12.dp))
-                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-                                Spacer(modifier = Modifier.height(12.dp))
-
-                                Text(
-                                    text = "📋 资产分类编号前缀对应表 (可编辑字段):",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                Spacer(modifier = Modifier.height(6.dp))
-
+                                HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                                Text("索引前缀设置", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                                 val categories = stockItems.map { it.category }.distinct().filter { it.isNotEmpty() }
                                 if (categories.isEmpty()) {
-                                    Text(
-                                        text = "当前清单中暂无资产分类。请先导入资产台账。",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = Color.Gray,
-                                        modifier = Modifier.padding(vertical = 4.dp)
-                                    )
+                                    Text("请先导入资产清单。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 } else {
-                                    categories.forEach { cat ->
-                                        var prefixValue by remember { mutableStateOf(viewModel.getCategoryPrefix(cat)) }
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(vertical = 4.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = cat,
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.Medium,
-                                                modifier = Modifier.weight(1f)
-                                            )
+                                    categories.forEach { category ->
+                                        var prefix by remember(category) { mutableStateOf(viewModel.getCategoryPrefix(category)) }
+                                        Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Text(category, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                                             OutlinedTextField(
-                                                value = prefixValue,
-                                                onValueChange = { newVal ->
-                                                    prefixValue = newVal
-                                                    viewModel.saveCategoryPrefix(cat, newVal)
-                                                },
-                                                placeholder = { Text("例如 C-1-1", fontSize = 11.sp) },
+                                                value = prefix,
+                                                onValueChange = { prefix = it; viewModel.saveCategoryPrefix(category, it) },
                                                 singleLine = true,
-                                                textStyle = TextStyle(fontSize = 12.sp),
-                                                modifier = Modifier
-                                                    .width(130.dp)
-                                                    .height(46.dp),
-                                                shape = RoundedCornerShape(6.dp)
+                                                modifier = Modifier.width(132.dp),
+                                                textStyle = MaterialTheme.typography.bodySmall
                                             )
                                         }
                                     }
@@ -311,309 +183,62 @@ fun WatermarkSettingsPage(
                     }
                 }
 
-                // Widget 3: Bottom-left coordinates and references watermarks
                 item {
-                    ElevatedCard(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 8.dp),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.Place,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "左下角相机实地定位水印",
-                                    fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
+                    ElevatedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
+                        Column(Modifier.fillMaxWidth().padding(14.dp)) {
+                            Text("水印相机", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                TextButton(onClick = {
+                                    viewModel.updateWatermarkBlSettings(showDate = true, showTime = true, showGps = true, showAddress = true)
+                                }) { Text("全选") }
+                                TextButton(onClick = {
+                                    viewModel.updateWatermarkBlSettings(showDate = false, showTime = false, showGps = false, showAddress = false)
+                                }) { Text("取消全选") }
                             }
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "附加硬件环境实拍参考水印",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 13.sp
-                                    )
-                                    Text(
-                                        text = "展示高精度时间刻度戳与经纬度参考背板",
-                                        fontSize = 11.sp,
-                                        color = Color.Gray
-                                    )
-                                }
-                                Switch(
-                                    checked = blEnabled,
-                                    onCheckedChange = { viewModel.updateWatermarkBlSettings(enabled = it) },
-                                    modifier = Modifier.testTag("bl_setting_switch").scale(0.85f)
-                                )
-                            }
-
-                            if (blEnabled) {
-                                Spacer(modifier = Modifier.height(12.dp))
-                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-                                Spacer(modifier = Modifier.height(12.dp))
-
-                                Text(
-                                    text = "选择要显示的水印字段内容:",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-
-                                // Perfect Grid alignment using equal weights
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Row(
-                                        modifier = Modifier.weight(1f),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Checkbox(
-                                            checked = showDate,
-                                            onCheckedChange = { viewModel.updateWatermarkBlSettings(showDate = it) },
-                                            modifier = Modifier.testTag("chk_detail_date").scale(0.85f)
-                                        )
-                                        Text("拍摄日期", fontSize = 12.sp)
-                                    }
-                                    Row(
-                                        modifier = Modifier.weight(1f),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Checkbox(
-                                            checked = showTime,
-                                            onCheckedChange = { viewModel.updateWatermarkBlSettings(showTime = it) },
-                                            modifier = Modifier.testTag("chk_detail_time").scale(0.85f)
-                                        )
-                                        Text("拍摄时刻", fontSize = 12.sp)
-                                    }
-                                }
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Row(
-                                        modifier = Modifier.weight(1f),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Checkbox(
-                                            checked = showGps,
-                                            onCheckedChange = { viewModel.updateWatermarkBlSettings(showGps = it) },
-                                            modifier = Modifier.testTag("chk_detail_gps").scale(0.85f)
-                                        )
-                                        Text("传感器GPS经纬度", fontSize = 12.sp)
-                                    }
-                                    Row(
-                                        modifier = Modifier.weight(1f),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Checkbox(
-                                            checked = showAddress,
-                                            onCheckedChange = { viewModel.updateWatermarkBlSettings(showAddress = it) },
-                                            modifier = Modifier.testTag("chk_detail_address").scale(0.85f)
-                                        )
-                                        Text("物理存放参考位置说明", fontSize = 12.sp)
-                                    }
-                                }
-
-                                // Informational Shield Box
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
-                                        .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
-                                        .padding(12.dp)
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            imageVector = Icons.Default.Info,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text(
-                                            text = "物理数据自动采集保障声明",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    Text(
-                                        text = "为满足金融行业严格的现场实勘审计和存证合规要求，系统的拍摄日期时间、经纬度坐标与物理位置说明均将全自动、非对称解密地直接从设备硬件GPS模块 and 照片原始物理元数据流（EXIF）中采集提取，排除任何人性的填写漏洞和数据篡改空间。",
-                                        fontSize = 11.sp,
-                                        lineHeight = 15.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Widget 4: Dynamic preview mockup render
-                item {
-                    Text(
-                        text = "🔍 专属水印效果实时预览",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 12.dp, bottom = 6.dp)
-                    )
-
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(160.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFF0F172A))
-                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
-                    ) {
-                        Canvas(modifier = Modifier.fillMaxSize()) {
-                            drawRect(
-                                color = Color(0xFF1E293B),
-                                size = size
+                            WatermarkOptionRow(
+                                firstLabel = "拍摄日期", firstChecked = showDate, firstTag = "chk_detail_date", firstChange = { viewModel.updateWatermarkBlSettings(showDate = it) },
+                                secondLabel = "拍摄时间", secondChecked = showTime, secondTag = "chk_detail_time", secondChange = { viewModel.updateWatermarkBlSettings(showTime = it) }
                             )
-                            val gridColor = Color(0xFF334155)
-                            val spacingValue = 30f
-                            var offsetValue = 0f
-                            while (offsetValue < size.width + size.height) {
-                                drawLine(
-                                    color = gridColor,
-                                    start = androidx.compose.ui.geometry.Offset(offsetValue, 0f),
-                                    end = androidx.compose.ui.geometry.Offset(offsetValue - size.height, size.height),
-                                    strokeWidth = 2f
-                                )
-                                offsetValue += spacingValue
-                            }
-                        }
-
-                        // Top-Right Sticker Preview
-                        if (watermarkTrEnabled) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .padding(8.dp)
-                                    .background(Color.Red, RoundedCornerShape(2.dp))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) {
-                                val sampleCategory = stockItems.firstOrNull()?.category ?: "默认分类"
-                                val prefix = viewModel.getCategoryPrefix(sampleCategory).ifEmpty { "C-1" }
-                                Text(
-                                    text = "$prefix-0001",
-                                    color = Color.White,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-
-                        // Bottom-Left Canvas Overlay
-                        if (blEnabled) {
-                            Column(
-                                modifier = Modifier
-                                    .align(Alignment.BottomStart)
-                                    .padding(10.dp)
-                                    .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
-                                    .padding(6.dp)
-                            ) {
-                                if (showDate) {
-                                    Text(
-                                        text = "拍摄日期：2026年06月01日",
-                                        color = Color.White,
-                                        fontSize = 9.sp,
-                                        style = TextStyle(shadow = androidx.compose.ui.graphics.Shadow(color = Color.Black, blurRadius = 1f))
-                                    )
-                                }
-                                if (showTime) {
-                                    Text(
-                                        text = "时间：14:38:58",
-                                        color = Color.White,
-                                        fontSize = 9.sp,
-                                        style = TextStyle(shadow = androidx.compose.ui.graphics.Shadow(color = Color.Black, blurRadius = 1f))
-                                    )
-                                }
-                                if (showGps) {
-                                    val dLat = blLat.toDoubleOrNull()
-                                    val dLng = blLng.toDoubleOrNull()
-                                    val locationText = if (dLat != null && dLng != null && dLat != 0.0 && dLng != 0.0) {
-                                        String.format(java.util.Locale.CHINA, "经度：%.2f  纬度：%.2f", dLng, dLat)
-                                    } else {
-                                        "经纬度：未获取定位"
-                                    }
-                                    Text(
-                                        text = locationText,
-                                        color = Color.White,
-                                        fontSize = 9.sp,
-                                        style = TextStyle(shadow = androidx.compose.ui.graphics.Shadow(color = Color.Black, blurRadius = 1f))
-                                    )
-                                }
-                                if (showAddress) {
-                                    Text(
-                                        text = "位置：${blAddress.ifBlank { "未获取定位" }}",
-                                        color = Color.White,
-                                        fontSize = 9.sp,
-                                        style = TextStyle(shadow = androidx.compose.ui.graphics.Shadow(color = Color.Black, blurRadius = 1f)),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
+                            WatermarkOptionRow(
+                                firstLabel = "经纬度", firstChecked = showGps, firstTag = "chk_detail_gps", firstChange = { viewModel.updateWatermarkBlSettings(showGps = it) },
+                                secondLabel = "位置", secondChecked = showAddress, secondTag = "chk_detail_address", secondChange = { viewModel.updateWatermarkBlSettings(showAddress = it) }
+                            )
                         }
                     }
                 }
             } else {
                 item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 32.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = null,
-                            tint = Color.Gray,
-                            modifier = Modifier.size(48.dp)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "专属水印功能已关闭",
-                            fontWeight = FontWeight.Bold,
-                            color = Color.Gray,
-                            fontSize = 14.sp
-                        )
-                        Text(
-                            text = "关闭水印后生成的交付版本 PDF 将恢复为无水印纯面台账文档",
-                            fontSize = 11.sp,
-                            color = Color.Gray,
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
+                    Column(Modifier.fillMaxWidth().padding(vertical = 28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.Close, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(40.dp))
+                        Spacer(Modifier.height(8.dp))
+                        Text("水印功能已关闭", fontWeight = FontWeight.Bold, color = Color.Gray)
+                        Text("水印关闭后导出 PDF 将均不带有水印。", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                     }
                 }
             }
+        }
+    }
+}
 
-            item {
-                Spacer(modifier = Modifier.height(30.dp))
-            }
+@Composable
+private fun WatermarkOptionRow(
+    firstLabel: String,
+    firstChecked: Boolean,
+    firstTag: String,
+    firstChange: (Boolean) -> Unit,
+    secondLabel: String,
+    secondChecked: Boolean,
+    secondTag: String,
+    secondChange: (Boolean) -> Unit
+) {
+    Row(Modifier.fillMaxWidth()) {
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(firstChecked, firstChange, Modifier.testTag(firstTag))
+            Text(firstLabel, style = MaterialTheme.typography.bodyMedium)
+        }
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(secondChecked, secondChange, Modifier.testTag(secondTag))
+            Text(secondLabel, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }

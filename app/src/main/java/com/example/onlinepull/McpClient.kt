@@ -73,7 +73,7 @@ class McpClient(
         val result = request("initialize", JSONObject()
             .put("protocolVersion", VERSION)
             .put("capabilities", JSONObject())
-            .put("clientInfo", JSONObject().put("name", "tenken-inventory").put("version", "1.0")))
+            .put("clientInfo", JSONObject().put("name", "jianpantong").put("version", "1.0")))
             ?: throw RemoteParseFailure("MCP 初始化没有返回结果")
         if (result.optString("protocolVersion") != VERSION || result.optJSONObject("capabilities")?.has("tools") != true) {
             throw McpFailure("MCP 协议或工具能力与此版本不兼容")

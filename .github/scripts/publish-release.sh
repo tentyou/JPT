@@ -2,8 +2,8 @@
 set -euo pipefail
 
 tag="build-${GITHUB_RUN_NUMBER}-${GITHUB_SHA:0:7}"
-apk="tenken-${tag}-debug.apk"
-notes="${RUNNER_TEMP}/tenken-release-notes.md"
+apk="jianpantong-${tag}-debug.apk"
+notes="${RUNNER_TEMP}/jianpantong-release-notes.md"
 
 cp release-artifacts/app-debug.apk "$apk"
 sha256sum "$apk" > "${apk}.sha256"

@@ -1,12 +1,15 @@
 from pathlib import Path
+import re
 from docx import Document
-from docx.shared import Pt
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import Inches as DocxInches, Pt
 from pptx import Presentation
 from pptx.util import Inches, Pt as PptPt
 from pptx.dml.color import RGBColor
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs" / "competition"
+IMAGE_RE = re.compile(r"^!\[(?P<alt>.*?)]\((?P<path>.+?)\)$")
 
 
 def markdown_to_docx(source: Path, target: Path) -> None:
@@ -18,6 +21,17 @@ def markdown_to_docx(source: Path, target: Path) -> None:
         line = raw.strip()
         if not line:
             continue
+        image = IMAGE_RE.match(line)
+        if image:
+            image_path = (source.parent / image.group("path")).resolve()
+            if image_path.is_file():
+                paragraph = doc.add_paragraph()
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                paragraph.add_run().add_picture(str(image_path), width=DocxInches(3.0))
+                caption = doc.add_paragraph(image.group("alt"))
+                caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                caption.style = styles["Caption"]
+            continue
         if line.startswith("# "):
             doc.add_heading(line[2:], 0)
         elif line.startswith("## "):
@@ -26,8 +40,8 @@ def markdown_to_docx(source: Path, target: Path) -> None:
             doc.add_heading(line[4:], 2)
         elif line.startswith("- "):
             doc.add_paragraph(line[2:], style="List Bullet")
-        elif len(line) > 2 and line[0].isdigit() and line[1:3] == ". ":
-            doc.add_paragraph(line[3:], style="List Number")
+        elif re.match(r"^\d+\.\s+", line):
+            doc.add_paragraph(re.sub(r"^\d+\.\s+", "", line), style="List Number")
         elif not line.startswith(("```", "|", "<http")):
             doc.add_paragraph(line.replace("**", "").replace("`", ""))
     doc.save(target)

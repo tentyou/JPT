@@ -546,12 +546,12 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Column {
                                         Text(
-                                            text = "无线传单 HTTP 传送",
+                                            text = "Wi-Fi 传输",
                                             style = MaterialTheme.typography.bodySmall,
                                             fontWeight = FontWeight.Bold
                                         )
                                         Text(
-                                            text = if (wifiEnabled) "服务器开启中..." else "电脑输入网址传送导入",
+                                            text = if (wifiEnabled) "已开启，可在电脑浏览器访问" else "打开后复制传输地址",
                                             fontSize = 10.sp,
                                             color = Color.Gray
                                         )
@@ -567,7 +567,7 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
                             if (wifiEnabled && ipAddress != null) {
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
-                                    text = "IP地址:",
+                                    text = "传输地址",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.primary
@@ -613,14 +613,6 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
                                         shape = RoundedCornerShape(6.dp)
                                     )
                                     Spacer(modifier = Modifier.weight(1f))
-                                    TextButton(
-                                        onClick = { showWatermarkSettingsPage = true },
-                                        contentPadding = PaddingValues(horizontal = 6.dp)
-                                    ) {
-                                        Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(12.dp))
-                                        Spacer(modifier = Modifier.width(2.dp))
-                                        Text("类别前缀", fontSize = 10.sp)
-                                    }
                                 }
                             }
                         }
@@ -726,14 +718,7 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
                         }
                     }
 
-                    HorizontalDivider()
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Text(
-                        text = "物理数据独立存储隔离机理",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.LightGray,
-                        modifier = Modifier.align(Alignment.CenterHorizontally)
-                    )
+
                 }
             }
         }
@@ -891,62 +876,39 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
                         Spacer(modifier = Modifier.height(12.dp))
                     }
 
-// Stats Category Card dynamically mapped
-                    item {
-                        StatsCategoryCard(
-                            onImportClick = { documentImportLauncher.launch(arrayOf("*/*")) },
-                            onTemplateClick = {
-                                xlsxTemplateLauncher.launch("盘点表模板.xlsx")
-                            },
-                            onOnlinePullClick = onOpenOnlinePull
-                        )
-                        Spacer(modifier = Modifier.height(10.dp))
-                    }
-
+// Project tools
                     item {
                         val watermarkEnabled by viewModel.watermarkEnabled.collectAsStateWithLifecycle()
-                        ElevatedCard(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("图片水印", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                                    Text(
-                                        if (isWatermarking) "正在更新已有 PDF…" else if (watermarkEnabled) "拍照信息与资产序号" else "已关闭",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                TextButton(
-                                    onClick = { showWatermarkSettingsPage = true },
-                                    modifier = Modifier.testTag("detailed_watermark_settings_button")
-                                ) { Text("设置") }
-                                Switch(
-                                    checked = watermarkEnabled,
-                                    onCheckedChange = { showWatermarkConfirmDialog = it },
-                                    modifier = Modifier.testTag("watermark_switch").scale(0.85f)
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(10.dp))
+                        StatsCategoryCard(
+                            onImportClick = { documentImportLauncher.launch(arrayOf("*/*")) },
+                            onTemplateClick = { xlsxTemplateLauncher.launch("盘点表模板.xlsx") },
+                            onOnlinePullClick = onOpenOnlinePull,
+                            showTemplate = remoteLink == null,
+                            watermarkEnabled = watermarkEnabled,
+                            watermarkStatus = if (isWatermarking) "正在更新 PDF…" else if (watermarkEnabled) "已开启" else "已关闭",
+                            onWatermarkSettings = { showWatermarkSettingsPage = true },
+                            onWatermarkToggle = { showWatermarkConfirmDialog = it }
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
                     }
-
 
                     if (remoteLink != null) {
                         item {
-                            Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                            Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
                                 remoteLink?.lastSyncError?.let {
                                     Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                                 }
-                                Text("上次完整同步：" + (remoteLink?.lastSyncAt?.let {
-                                    java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.CHINA).format(java.util.Date(it))
-                                } ?: "尚未完成"), style = MaterialTheme.typography.bodySmall)
-                                OutlinedButton(onClick = { showRemoteHistory = true }) {
-                                    Text("历史与核对（${remoteBindings.count { !it.active || it.syncState == "conflict" }}）")
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        "上次同步：" + (remoteLink?.lastSyncAt?.let {
+                                            java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.CHINA).format(java.util.Date(it))
+                                        } ?: "尚未完成"),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    TextButton(onClick = { showRemoteHistory = true }) {
+                                        Text("历史与核对（${remoteBindings.count { !it.active || it.syncState == "conflict" }}）")
+                                    }
                                 }
                             }
                         }
@@ -1041,13 +1003,7 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
                             }
                         } else {
                             items(filteredStockItems, key = { it.uid }) { item ->
-                                val seq = try {
-                                    if (item.originalRowJson.isNotEmpty()) {
-                                        val m = Regex("\"([^\"]*)\"").find(item.originalRowJson)
-                                        m?.groupValues?.get(1) ?: "1"
-                                    } else "1"
-                                } catch (e: Exception) { "1" }
-                                val formattedName = "${item.name}（${item.category}-$seq）"
+                                val formattedName = if (item.category.isBlank() || item.name.contains(item.category)) item.name else "${item.name}（${item.category}）"
 
                                 Card(
                                     modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -1652,7 +1608,7 @@ fun DashboardScreen(viewModel: StockViewModel, onOpenOnlinePull: () -> Unit = {}
                 ) {
                     CircularProgressIndicator(
                         color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(48.dp)
+                        modifier = Modifier.size(38.dp)
                     )
                     Spacer(modifier = Modifier.height(20.dp))
                     Text(
@@ -1776,11 +1732,11 @@ private fun TenkenDashboardHeader(
     val completion = if (totalCount == 0) 0f else photographedCount.toFloat() / totalCount.toFloat()
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(18.dp),
         color = MaterialTheme.colorScheme.primaryContainer,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.16f))
     ) {
-        Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1793,10 +1749,10 @@ private fun TenkenDashboardHeader(
                         color = MaterialTheme.colorScheme.secondary,
                         fontWeight = FontWeight.Bold
                     )
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = projectName,
-                        style = MaterialTheme.typography.headlineSmall,
+                        style = MaterialTheme.typography.titleLarge,
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -1811,19 +1767,19 @@ private fun TenkenDashboardHeader(
                 Surface(
                     shape = CircleShape,
                     color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
-                    modifier = Modifier.size(48.dp)
+                    modifier = Modifier.size(38.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = Icons.Default.FactCheck,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(26.dp)
+                            modifier = Modifier.size(21.dp)
                         )
                     }
                 }
             }
-            Spacer(modifier = Modifier.height(18.dp))
+            Spacer(modifier = Modifier.height(10.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1832,7 +1788,7 @@ private fun TenkenDashboardHeader(
                 TenkenMetric(label = "已成册", value = photographedCount.toString(), accent = MaterialTheme.colorScheme.secondary)
                 TenkenMetric(label = "总资产", value = totalCount.toString(), accent = MaterialTheme.colorScheme.primary)
             }
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1854,7 +1810,7 @@ private fun TenkenDashboardHeader(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.72f)
             )
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             ProjectInfoInline(project = project, fromRemote = fromRemote, onEdit = onEditProject)
         }
     }
@@ -1867,8 +1823,8 @@ private fun RowScope.TenkenMetric(label: String, value: String, accent: Color) {
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.66f)
     ) {
-        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
-            Text(value, style = MaterialTheme.typography.titleLarge, color = accent, fontWeight = FontWeight.Bold)
+        Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)) {
+            Text(value, style = MaterialTheme.typography.titleMedium, color = accent, fontWeight = FontWeight.Bold)
             Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }

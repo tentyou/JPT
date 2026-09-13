@@ -47,6 +47,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
@@ -185,7 +186,7 @@ fun TutorialGuideCard(
                     Text("4️⃣ ", style = MaterialTheme.typography.bodyMedium)
                     Column {
                         Text("一键传送与无线导出", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                        Text("开启 Wi-Fi 传单开关，电脑端浏览器扫码/直接输入地址即可轻松拖动上传新表单！", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                        Text("开启 Wi-Fi 传输后，在电脑浏览器粘贴完整地址即可下载项目资料。", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                     }
                 }
             }
@@ -240,67 +241,62 @@ fun TutorialGuideCard(
 fun StatsCategoryCard(
     onImportClick: () -> Unit,
     onTemplateClick: () -> Unit,
-    onOnlinePullClick: () -> Unit
+    onOnlinePullClick: () -> Unit,
+    showTemplate: Boolean,
+    watermarkEnabled: Boolean,
+    watermarkStatus: String,
+    onWatermarkSettings: () -> Unit,
+    onWatermarkToggle: (Boolean) -> Unit
 ) {
-    Column(modifier = Modifier.padding(vertical = 6.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Button(
-                onClick = onImportClick,
-                modifier = Modifier
-                    .weight(1f)
-                    .height(48.dp)
-                    .testTag("import_csv_button"),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary
-                ),
-                shape = RoundedCornerShape(10.dp)
-            ) {
-                Icon(imageVector = Icons.Default.Attachment, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("导入盘点表", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("项目工具", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ToolButton("导入盘点表", Icons.Default.Attachment, onImportClick, Modifier.weight(1f).testTag("import_csv_button"))
+                if (showTemplate) {
+                    ToolButton("盘点表模板", Icons.Default.Download, onTemplateClick, Modifier.weight(1f).testTag("download_template_button"))
+                } else {
+                    ToolButton("线上同步", Icons.Default.CloudUpload, onOnlinePullClick, Modifier.weight(1f).testTag("online_pull_button"))
+                }
             }
-
-            OutlinedButton(
-                onClick = onTemplateClick,
-                modifier = Modifier
-                    .weight(1f)
-                    .height(48.dp)
-                    .testTag("download_template_button"),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = MaterialTheme.colorScheme.primary
-                ),
-                shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
-            ) {
-                Icon(imageVector = Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("盘点表模板", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            if (showTemplate) {
+                ToolButton("线上同步", Icons.Default.CloudUpload, onOnlinePullClick, Modifier.fillMaxWidth().testTag("online_pull_button"))
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("图片水印", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
+                    Text(watermarkStatus, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                TextButton(onClick = onWatermarkSettings, modifier = Modifier.testTag("detailed_watermark_settings_button")) { Text("设置") }
+                Switch(checked = watermarkEnabled, onCheckedChange = onWatermarkToggle, modifier = Modifier.testTag("watermark_switch").scale(0.82f))
             }
         }
+    }
+}
 
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // 线上作业系统拉取入口
-        Button(
-            onClick = onOnlinePullClick,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp)
-                .testTag("online_pull_button"),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-            ),
-            shape = RoundedCornerShape(10.dp)
-        ) {
-            Icon(imageVector = Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(modifier = Modifier.width(6.dp))
-            Text("线上拉取（ty.zhrdc.net）", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-        }
+@Composable
+private fun ToolButton(
+    label: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = modifier.height(42.dp),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        shape = RoundedCornerShape(9.dp),
+        contentPadding = PaddingValues(horizontal = 10.dp)
+    ) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 1)
     }
 }
 

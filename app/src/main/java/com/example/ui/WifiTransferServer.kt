@@ -2033,7 +2033,7 @@ class WifiTransferServer(
                         status.className = 'status-box active status-success';
                         status.style.display = 'block';
                         status.innerHTML = "ZIP 压缩整包生成成功。(大小: " + (data.size / 1024 / 1024).toFixed(2) + " MB)<br>" +
-                                           "<a href='/download-zip?projectId=" + encodeURIComponent(sel.value) + "&token=" + encodeURIComponent(authToken) + "' style='display: inline-block; margin-top: 12px; background-color: #10b981; color: white; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: bold; border: 1px solid #059669; transition: background-color 0.2s;'>下载 ZIP 压缩包 (内含分类盘点表及点检报告)</a>";
+                                           "<a href='/download-zip?projectId=" + encodeURIComponent(sel.value) + "&token=" + encodeURIComponent(authToken) + "' style='display: inline-block; margin-top: 12px; background-color: #10b981; color: white; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: bold; border: 1px solid #059669; transition: background-color 0.2s;'>下载 ZIP 压缩包 (内含分类盘点表及盘点报告)</a>";
                       } else {
                         status.className = 'status-box active status-error';
                         status.style.display = 'block';

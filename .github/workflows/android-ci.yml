@@ -25,7 +25,7 @@ jobs:
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: tenken-debug
+          name: jianpantong-debug
           path: app/build/outputs/apk/debug/app-debug.apk
       - name: Upload test reports
         if: always()
@@ -46,7 +46,7 @@ jobs:
       - name: Download tested APK
         uses: actions/download-artifact@v4
         with:
-          name: tenken-debug
+          name: jianpantong-debug
           path: release-artifacts
       - name: Publish tested APK
         env:
